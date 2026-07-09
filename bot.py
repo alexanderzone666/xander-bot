@@ -20,6 +20,42 @@ import tweepy
 
 import config
 
+# --- auto-clean secrets: strip invisible spaces/newlines from pastes ---
+for _k in ["ANTHROPIC_API_KEY", "X_API_KEY", "X_API_SECRET",
+           "X_ACCESS_TOKEN", "X_ACCESS_SECRET"]:
+    _v = getattr(config, _k, "")
+    setattr(config, _k, str(_v).strip())
+
+# --- sanity checks: catch swapped or wrong values with clear messages ---
+def check_credentials():
+    problems = []
+    if "-" not in config.X_ACCESS_TOKEN:
+        problems.append(
+            "X_ACCESS_TOKEN looks wrong: it must contain a dash '-' "
+            "(format: numbers-letters). You may have pasted the wrong value.")
+    if "-" in config.X_API_KEY:
+        problems.append(
+            "X_API_KEY looks wrong: it should NOT contain a dash. "
+            "You may have pasted the Access Token here by mistake.")
+    if len(config.X_API_SECRET) < 40:
+        problems.append("X_API_SECRET looks too short - wrong value pasted?")
+    if len(config.X_ACCESS_SECRET) < 40:
+        problems.append("X_ACCESS_SECRET looks too short - wrong value pasted?")
+    for p in problems:
+        print("CREDENTIAL PROBLEM:", p)
+    return len(problems) == 0
+
+
+def verify_login(client):
+    try:
+        me = client.get_me(user_auth=True)
+        print(f"AUTH OK - logged in as @{me.data.username}")
+        return True
+    except Exception as e:
+        print("AUTH FAILED at login check. This means the 4 X keys in GitHub")
+        print("do not form a valid pair. Details:", e)
+        return False
+
 PHOTOS_DIR = Path(__file__).parent / "photos"
 
 # ------------------- MARKET DATA -------------------
@@ -75,11 +111,11 @@ def make_chart(df, stats):
 
     ax.axhline(stats["high_30d"], color="#9ca3af", ls="--", lw=0.9, alpha=0.6)
     ax.axhline(stats["low_30d"], color="#9ca3af", ls="--", lw=0.9, alpha=0.6)
-    hi_label = f'  {stats["high_30d"]:,}'
-    lo_label = f'  {stats["low_30d"]:,}'
+    hi = f'  {stats["high_30d"]:,}'
+    lo = f'  {stats["low_30d"]:,}'
     x0 = df["date"].iloc[0]
-    ax.text(x0, stats["high_30d"], hi_label, color="#d1d5db", fontsize=9, va="bottom")
-    ax.text(x0, stats["low_30d"], lo_label, color="#d1d5db", fontsize=9, va="top")
+    ax.text(x0, stats["high_30d"], hi, color="#d1d5db", fontsize=9, va="bottom")
+    ax.text(x0, stats["low_30d"], lo, color="#d1d5db", fontsize=9, va="top")
 
     sign = "+" if up else ""
     title = f'{stats["asset"]}  -  ${stats["latest"]:,}  ({sign}{stats["change_30d_pct"]}% / 30d)'
@@ -230,6 +266,8 @@ def post_to_x(text, image_buf=None):
         access_token=config.X_ACCESS_TOKEN,
         access_token_secret=config.X_ACCESS_SECRET,
     )
+    if not verify_login(client):
+        raise SystemExit(1)
     media_ids = None
     if image_buf is not None:
         try:
@@ -278,6 +316,10 @@ def slot_3_motivation():
 
 
 def main():
+    if not check_credentials():
+        print("Fix the GitHub secret(s) named above, then re-run.")
+        raise SystemExit(1)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--slot", type=int, choices=[1, 2, 3])
     args = parser.parse_args()
