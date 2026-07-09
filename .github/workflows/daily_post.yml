@@ -34,7 +34,7 @@ jobs:
 
       - name: Install dependencies
         if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
-        run: pip install anthropic tweepy yfinance matplotlib pandas requests
+        run: pip install anthropic tweepy yfinance matplotlib pandas requests requests-oauthlib
 
       - name: Write secrets config
         if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
