@@ -1,0 +1,76 @@
+# Put this at: .github/workflows/daily_post.yml in your private GitHub repo
+# Add your 5 keys under: Repo Settings -> Secrets and variables -> Actions
+#
+# HOW IT WORKS:
+# Runs every hour from 07:00-22:00 UTC. Each run asks scheduler.py:
+# "is this one of today's randomly-chosen posting hours?"
+# - Most hours: exits in seconds (costs nothing meaningful)
+# - Posting hours: waits a random few minutes, then posts
+# Every day gets a NEW random schedule, and ~30% of days get a 4th bonus post.
+# GitHub's own scheduling jitter adds 5-20 extra minutes, so timestamps
+# look fully human (e.g. 9:31, 14:07, 19:48 - different every day).
+
+name: X Content Engine
+a
+on:
+  schedule:
+    - cron: "0 7-22 * * *"   # hourly check window (UTC)
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Force a post now: 1=market, 2=story, 3=motivation"
+        required: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check today's random schedule
+        id: plan
+        run: |
+          if [ -n "${{ github.event.inputs.slot }}" ]; then
+            echo "result=SLOT=${{ github.event.inputs.slot }} DELAY=0" >> $GITHUB_OUTPUT
+          else
+            echo "result=$(python scheduler.py)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Stop if not a posting hour
+        if: contains(steps.plan.outputs.result, 'skip')
+        run: echo "Not a posting hour today. Exiting."
+
+      - name: Install dependencies
+        if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
+        run: pip install anthropic tweepy yfinance matplotlib pandas requests
+
+      - name: Write secrets config
+        if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
+        run: |
+          python - << 'EOF'
+          import os, re
+          cfg = open("config.py").read()
+          for key in ["ANTHROPIC_API_KEY","X_API_KEY","X_API_SECRET","X_ACCESS_TOKEN","X_ACCESS_SECRET"]:
+              cfg = re.sub(rf'{key} = .*', f'{key} = "{os.environ[key]}"', cfg)
+          open("config.py","w").write(cfg)
+          EOF
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+
+      - name: Wait a random few minutes, then post
+        if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
+        run: |
+          RESULT="${{ steps.plan.outputs.result }}"
+          SLOT=$(echo $RESULT | sed 's/.*SLOT=\([0-9]*\).*/\1/')
+          DELAY=$(echo $RESULT | sed 's/.*DELAY=\([0-9]*\).*/\1/')
+          echo "Posting slot $SLOT after $DELAY min delay"
+          sleep $((DELAY * 60))
+          python bot.py --slot $SLOT
