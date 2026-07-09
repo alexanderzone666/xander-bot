@@ -26,7 +26,8 @@ PHOTOS_DIR = Path(__file__).parent / "photos"
 
 def get_bitcoin_data(days=30):
     url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
-    r = requests.get(url, params={"vs_currency": "usd", "days": days, "interval": "daily"}, timeout=30)
+    params = {"vs_currency": "usd", "days": days, "interval": "daily"}
+    r = requests.get(url, params=params, timeout=30)
     r.raise_for_status()
     df = pd.DataFrame(r.json()["prices"], columns=["ts", "close"])
     df["date"] = pd.to_datetime(df["ts"], unit="ms")
@@ -44,7 +45,10 @@ def get_gold_data(days=30):
 
 def summarize(df, asset_name):
     latest = float(df["close"].iloc[-1])
-    week_ago = float(df["close"].iloc[-6]) if len(df) > 6 else float(df["close"].iloc[0])
+    if len(df) > 6:
+        week_ago = float(df["close"].iloc[-6])
+    else:
+        week_ago = float(df["close"].iloc[0])
     month_ago = float(df["close"].iloc[0])
     return {
         "asset": asset_name,
@@ -66,17 +70,22 @@ def make_chart(df, stats):
     line_color = "#22c55e" if up else "#ef4444"
 
     ax.plot(df["date"], df["close"], color=line_color, linewidth=2.2)
-    ax.fill_between(df["date"], df["close"], df["close"].min(), color=line_color, alpha=0.08)
+    floor = df["close"].min()
+    ax.fill_between(df["date"], df["close"], floor, color=line_color, alpha=0.08)
 
     ax.axhline(stats["high_30d"], color="#9ca3af", ls="--", lw=0.9, alpha=0.6)
     ax.axhline(stats["low_30d"], color="#9ca3af", ls="--", lw=0.9, alpha=0.6)
-    ax.text(df["date"].iloc[0], stats["high_30d"], f'  {stats["high_30d"]:,}', color="#d1d5db", fontsize=9, va="bottom")
-    ax.text(df["date"].iloc[0], stats["low_30d"], f'  {stats["low_30d"]:,}', color="#d1d5db", fontsize=9, va="top")
+    hi_label = f'  {stats["high_30d"]:,}'
+    lo_label = f'  {stats["low_30d"]:,}'
+    x0 = df["date"].iloc[0]
+    ax.text(x0, stats["high_30d"], hi_label, color="#d1d5db", fontsize=9, va="bottom")
+    ax.text(x0, stats["low_30d"], lo_label, color="#d1d5db", fontsize=9, va="top")
 
     sign = "+" if up else ""
-    ax.set_title(f'{stats["asset"]}  -  ${stats["latest"]:,}  ({sign}{stats["change_30d_pct"]}% / 30d)',
-                 color="white", fontsize=15, fontweight="bold", loc="left", pad=14)
-    ax.text(1.0, 1.02, config.CHART_WATERMARK, transform=ax.transAxes, color="#6b7280", fontsize=10, ha="right")
+    title = f'{stats["asset"]}  -  ${stats["latest"]:,}  ({sign}{stats["change_30d_pct"]}% / 30d)'
+    ax.set_title(title, color="white", fontsize=15, fontweight="bold", loc="left", pad=14)
+    ax.text(1.0, 1.02, config.CHART_WATERMARK, transform=ax.transAxes,
+            color="#6b7280", fontsize=10, ha="right")
 
     ax.tick_params(colors="#9ca3af", labelsize=9)
     for s in ax.spines.values():
@@ -101,8 +110,10 @@ def make_quote_card(hook_line):
     wrapped = "\n".join(textwrap.wrap(hook_line, width=34))
     ax.text(0.5, 0.55, wrapped, ha="center", va="center",
             color="white", fontsize=22, fontweight="bold", linespacing=1.6)
-    ax.text(0.5, 0.08, config.CHART_WATERMARK, ha="center", color="#6b7280", fontsize=12)
-    ax.plot([0.42, 0.58], [0.22, 0.22], color="#22c55e", lw=2, transform=ax.transAxes)
+    ax.text(0.5, 0.08, config.CHART_WATERMARK, ha="center",
+            color="#6b7280", fontsize=12)
+    ax.plot([0.42, 0.58], [0.22, 0.22], color="#22c55e", lw=2,
+            transform=ax.transAxes)
 
     buf = BytesIO()
     plt.tight_layout()
@@ -114,7 +125,8 @@ def make_quote_card(hook_line):
 
 def pick_story_image(hook_line):
     if PHOTOS_DIR.exists():
-        photos = [p for p in PHOTOS_DIR.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png")]
+        exts = (".jpg", ".jpeg", ".png")
+        photos = [p for p in PHOTOS_DIR.iterdir() if p.suffix.lower() in exts]
         if photos:
             photo = photos[dt.date.today().toordinal() % len(photos)]
             return open(photo, "rb")
@@ -185,6 +197,32 @@ def _ask(prompt):
 
 # ------------------- POST TO X -------------------
 
+def upload_image(image_buf):
+    from requests_oauthlib import OAuth1
+    auth = OAuth1(
+        config.X_API_KEY,
+        config.X_API_SECRET,
+        config.X_ACCESS_TOKEN,
+        config.X_ACCESS_SECRET,
+    )
+    if hasattr(image_buf, "read"):
+        data = image_buf.read()
+    else:
+        data = image_buf
+    url = "https://api.x.com/2/media/upload"
+    files = {"media": ("image.png", data, "image/png")}
+    r = requests.post(url, auth=auth, files=files)
+    r.raise_for_status()
+    j = r.json()
+    media_id = None
+    d = j.get("data")
+    if d:
+        media_id = d.get("id")
+    if not media_id:
+        media_id = j.get("media_id_string")
+    return media_id
+
+
 def post_to_x(text, image_buf=None):
     client = tweepy.Client(
         consumer_key=config.X_API_KEY,
@@ -195,12 +233,68 @@ def post_to_x(text, image_buf=None):
     media_ids = None
     if image_buf is not None:
         try:
-            from requests_oauthlib import OAuth1
-            auth = OAuth1(config.X_API_KEY, config.X_API_SECRET,
-                          config.X_ACCESS_TOKEN, config.X_ACCESS_SECRET)
-            data = image_buf.read() if hasattr(image_buf, "read") else image_buf
-            r = requests.post("https://api.x.com/2/media/upload", auth=auth,
-                              files={"media": ("image.png", data, "image/png")})
-            r.raise_for_status()
-            j = r.json()
-            media_id = j.get("data",
+            media_id = upload_image(image_buf)
+            if media_id:
+                media_ids = [str(media_id)]
+        except Exception as e:
+            print(f"Image upload failed, posting text-only: {e}")
+            media_ids = None
+    resp = client.create_tweet(text=text, media_ids=media_ids)
+    return resp.data["id"]
+
+# ------------------- SLOTS -------------------
+
+def slot_1_market():
+    if dt.date.today().toordinal() % 2 == 0:
+        asset = "Gold"
+        df = get_gold_data()
+    else:
+        asset = "Bitcoin"
+        df = get_bitcoin_data()
+    stats = summarize(df, asset)
+    text = gen_market_post(stats)
+    chart = make_chart(df, stats)
+    tweet_id = post_to_x(text, chart)
+    print(f"[slot1 market:{asset}] {tweet_id}")
+    print(text)
+
+
+def slot_2_story():
+    theme = random.choice(config.STORY_THEMES)
+    text = gen_story_post(theme)
+    hook = text.split("\n")[0]
+    image = pick_story_image(hook)
+    tweet_id = post_to_x(text, image)
+    print(f"[slot2 story] {tweet_id}")
+    print(text)
+
+
+def slot_3_motivation():
+    theme = random.choice(config.MOTIVATION_THEMES)
+    text = gen_motivation_post(theme)
+    tweet_id = post_to_x(text)
+    print(f"[slot3 motivation] {tweet_id}")
+    print(text)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--slot", type=int, choices=[1, 2, 3])
+    args = parser.parse_args()
+
+    slot = args.slot
+    if slot is None:
+        hour = dt.datetime.now(dt.timezone.utc).hour
+        if hour < 12:
+            slot = 1
+        elif hour < 17:
+            slot = 2
+        else:
+            slot = 3
+
+    slots = {1: slot_1_market, 2: slot_2_story, 3: slot_3_motivation}
+    slots[slot]()
+
+
+if __name__ == "__main__":
+    main()
