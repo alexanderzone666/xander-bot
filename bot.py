@@ -1,21 +1,3 @@
-"""
-Xander Zone - X Content Engine  (3 posts / day)
-------------------------------------------------
-Slot 1 (morning)  -> Live market analysis (Gold alternates with Bitcoin daily)
-                     + auto chart + "Not financial advice" disclaimer
-Slot 2 (midday)   -> Hot-take / storytelling post in an opinionated tone
-                     + image (your own photo from photos/ OR auto quote-card)
-Slot 3 (evening)  -> Motivational post about markets, money and mindset
-
-Run manually:      python bot.py --slot 1
-GitHub Actions runs each slot at its scheduled hour automatically.
-
-SAFETY FRAMING (hardcoded in every prompt):
-  - All market content is personal opinion / journal style
-  - Never "buy", "sell", "you should" - scenarios, not predictions-as-fact
-  - Slot 1 always ends with "Not financial advice." style line
-"""
-
 import os
 import sys
 import random
@@ -38,11 +20,9 @@ import tweepy
 
 import config
 
-PHOTOS_DIR = Path(__file__).parent / "photos"   # drop your own jpg/png photos here
+PHOTOS_DIR = Path(__file__).parent / "photos"
 
-# ----------------------------------------------------------------------
-# 1. MARKET DATA
-# ----------------------------------------------------------------------
+# ------------------- MARKET DATA -------------------
 
 def get_bitcoin_data(days=30):
     url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
@@ -75,12 +55,9 @@ def summarize(df, asset_name):
         "low_30d": round(float(df["close"].min()), 2),
     }
 
-# ----------------------------------------------------------------------
-# 2. IMAGES
-# ----------------------------------------------------------------------
+# ------------------- IMAGES -------------------
 
 def make_chart(df, stats):
-    """Dark branded price chart with 30d high/low marked."""
     fig, ax = plt.subplots(figsize=(10, 5.6), dpi=160)
     fig.patch.set_facecolor("#0d0d0f")
     ax.set_facecolor("#0d0d0f")
@@ -116,7 +93,6 @@ def make_chart(df, stats):
 
 
 def make_quote_card(hook_line):
-    """Clean dark typography card with the post's hook line - always safe to use."""
     fig, ax = plt.subplots(figsize=(10, 5.6), dpi=160)
     fig.patch.set_facecolor("#0d0d0f")
     ax.set_facecolor("#0d0d0f")
@@ -125,11 +101,8 @@ def make_quote_card(hook_line):
     wrapped = "\n".join(textwrap.wrap(hook_line, width=34))
     ax.text(0.5, 0.55, wrapped, ha="center", va="center",
             color="white", fontsize=22, fontweight="bold", linespacing=1.6)
-    ax.text(0.5, 0.08, config.CHART_WATERMARK, ha="center",
-            color="#6b7280", fontsize=12)
-    # subtle accent line
-    ax.plot([0.42, 0.58], [0.22, 0.22], color="#22c55e", lw=2,
-            transform=ax.transAxes)
+    ax.text(0.5, 0.08, config.CHART_WATERMARK, ha="center", color="#6b7280", fontsize=12)
+    ax.plot([0.42, 0.58], [0.22, 0.22], color="#22c55e", lw=2, transform=ax.transAxes)
 
     buf = BytesIO()
     plt.tight_layout()
@@ -140,20 +113,14 @@ def make_quote_card(hook_line):
 
 
 def pick_story_image(hook_line):
-    """Use one of YOUR photos if the photos/ folder has any, else generate a quote card.
-    Using your own lifestyle photos (cars, travel, setups) performs best and is
-    copyright-safe. Never auto-download images from the internet."""
     if PHOTOS_DIR.exists():
         photos = [p for p in PHOTOS_DIR.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png")]
         if photos:
-            # rotate by day so the same photo doesn't repeat back-to-back
             photo = photos[dt.date.today().toordinal() % len(photos)]
             return open(photo, "rb")
     return make_quote_card(hook_line)
 
-# ----------------------------------------------------------------------
-# 3. CONTENT (Claude)
-# ----------------------------------------------------------------------
+# ------------------- CONTENT (CLAUDE) -------------------
 
 claude = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
@@ -216,9 +183,7 @@ def _ask(prompt):
     )
     return msg.content[0].text.strip().strip('"')
 
-# ----------------------------------------------------------------------
-# 4. POST TO X
-# ----------------------------------------------------------------------
+# ------------------- POST TO X -------------------
 
 def post_to_x(text, image_buf=None):
     client = tweepy.Client(
@@ -229,59 +194,13 @@ def post_to_x(text, image_buf=None):
     )
     media_ids = None
     if image_buf is not None:
-        auth = tweepy.OAuth1UserHandler(
-            config.X_API_KEY, config.X_API_SECRET,
-            config.X_ACCESS_TOKEN, config.X_ACCESS_SECRET)
-        api_v1 = tweepy.API(auth)
-        media = api_v1.media_upload(filename="image.png", file=image_buf)
-        media_ids = [media.media_id]
-    resp = client.create_tweet(text=text, media_ids=media_ids)
-    return resp.data["id"]
-
-# ----------------------------------------------------------------------
-# 5. THE 3 DAILY SLOTS
-# ----------------------------------------------------------------------
-
-def slot_1_market():
-    # Gold on even days, Bitcoin on odd days - guaranteed variety
-    asset = "Gold" if dt.date.today().toordinal() % 2 == 0 else "Bitcoin"
-    df = get_gold_data() if asset == "Gold" else get_bitcoin_data()
-    stats = summarize(df, asset)
-    text = gen_market_post(stats)
-    chart = make_chart(df, stats)
-    tweet_id = post_to_x(text, chart)
-    print(f"[slot1 market:{asset}] {tweet_id}\n{text}")
-
-
-def slot_2_story():
-    theme = random.choice(config.STORY_THEMES)
-    text = gen_story_post(theme)
-    hook = text.split("\n")[0]
-    image = pick_story_image(hook)
-    tweet_id = post_to_x(text, image)
-    print(f"[slot2 story] {tweet_id}\n{text}")
-
-
-def slot_3_motivation():
-    theme = random.choice(config.MOTIVATION_THEMES)
-    text = gen_motivation_post(theme)
-    tweet_id = post_to_x(text)
-    print(f"[slot3 motivation] {tweet_id}\n{text}")
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--slot", type=int, choices=[1, 2, 3],
-                        help="1=market, 2=story+image, 3=motivation. If omitted, picked by current UTC hour.")
-    args = parser.parse_args()
-
-    slot = args.slot
-    if slot is None:
-        hour = dt.datetime.utcnow().hour
-        slot = 1 if hour < 12 else (2 if hour < 17 else 3)
-
-    {1: slot_1_market, 2: slot_2_story, 3: slot_3_motivation}[slot]()
-
-
-if __name__ == "__main__":
-    main()
+        try:
+            from requests_oauthlib import OAuth1
+            auth = OAuth1(config.X_API_KEY, config.X_API_SECRET,
+                          config.X_ACCESS_TOKEN, config.X_ACCESS_SECRET)
+            data = image_buf.read() if hasattr(image_buf, "read") else image_buf
+            r = requests.post("https://api.x.com/2/media/upload", auth=auth,
+                              files={"media": ("image.png", data, "image/png")})
+            r.raise_for_status()
+            j = r.json()
+            media_id = j.get("data",
