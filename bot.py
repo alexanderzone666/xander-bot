@@ -26,6 +26,7 @@ HERE = Path(__file__).parent
 PHOTOS_DIR = HERE / 'photos'
 PERF_LOG = HERE / 'performance_log.json'
 
+
 def get_bitcoin_data(days=30):
     url = 'https://api.coingecko.com/api/v3/coins/bitcoin/ohlc'
     r = requests.get(url, params={'vs_currency': 'usd', 'days': days}, timeout=30)
@@ -184,9 +185,13 @@ TONE = (
 )
 
 
-def _ask(prompt):
-    m = claude.messages.create(model='claude-sonnet-4-6', max_tokens=500, system=PERSONA, messages=[{'role': 'user', 'content': prompt}])
-    return m.content[0].text.strip().strip('"')
+def _ask(prompt, use_search=False):
+    kwargs = dict(model='claude-sonnet-4-6', max_tokens=800, system=PERSONA, messages=[{'role': 'user', 'content': prompt}])
+    if use_search:
+        kwargs['tools'] = [{'type': 'web_search_20250305', 'name': 'web_search'}]
+    m = claude.messages.create(**kwargs)
+    txt = '\n'.join([b.text for b in m.content if getattr(b, 'type', '') == 'text']).strip()
+    return txt.strip('"')
 
 
 def gen_market_post(s):
@@ -211,6 +216,10 @@ def gen_story(theme):
 
 def gen_motivation(theme):
     return _ask(f'Write ONE X post: motivational about markets, money, discipline, the builders journey. Theme: {theme}. Warm but strong, story-flavored. No advice. Under 270 chars. Return ONLY the post.')
+
+
+def gen_trending():
+    return _ask('Search the web for what is trending in trading, gold, bitcoin, or macro markets in the last 24 hours. Pick the single most talked-about topic. Then write ONE classy, hooking X post giving MY personal take on it in the persona voice - opinionated but elegant, crowd-psychology angle welcome. Reference the topic clearly so readers know what I am talking about. No links, no hashtags. Under 270 chars. If the take involves markets, end EXACTLY: Not financial advice. Return ONLY the post text.', use_search=True)
 
 
 def log_levels(s):
@@ -244,7 +253,7 @@ def upload_image(buf):
         media = api.media_upload(filename='image.png', file=io.BytesIO(data))
         return media.media_id
     except Exception as e:
-        print(f'v1 upload failed, trying v2: {e}')
+        print(f'v1.1 upload failed: {e}')
     from requests_oauthlib import OAuth1
     a = OAuth1(config.X_API_KEY, config.X_API_SECRET, config.X_ACCESS_TOKEN, config.X_ACCESS_SECRET)
     r = requests.post('https://api.x.com/2/media/upload', auth=a, files={'media': ('image.png', data, 'image/png')})
@@ -296,15 +305,26 @@ def slot_1_market():
 
 
 def slot_2_story():
+    if random.random() < 0.4:
+        try:
+            text = gen_trending()
+            tid = post_to_x(text, pick_story_image(text.split('\n')[0]))
+            print(f"[slot2 trending] {tid}")
+            print(text)
+            return
+        except Exception as e:
+            print(f'trending failed, falling back to story: {e}')
     text = gen_story(random.choice(config.STORY_THEMES))
     tid = post_to_x(text, pick_story_image(text.split('\n')[0]))
     print(f"[slot2 story] {tid}")
+    print(text)
 
 
 def slot_3_motivation():
     text = gen_motivation(random.choice(config.MOTIVATION_THEMES))
     tid = post_to_x(text)
     print(f"[slot3 motivation] {tid}")
+    print(text)
 
 
 def main():
