@@ -1,4 +1,5 @@
 import os
+import io
 import json
 import random
 import argparse
@@ -236,10 +237,17 @@ def _client():
 
 
 def upload_image(buf):
-    from requests_oauthlib import OAuth1
-    auth = OAuth1(config.X_API_KEY, config.X_API_SECRET, config.X_ACCESS_TOKEN, config.X_ACCESS_SECRET)
     data = buf.read() if hasattr(buf, 'read') else buf
-    r = requests.post('https://api.x.com/2/media/upload', auth=auth, files={'media': ('image.png', data, 'image/png')})
+    try:
+        auth = tweepy.OAuth1UserHandler(config.X_API_KEY, config.X_API_SECRET, config.X_ACCESS_TOKEN, config.X_ACCESS_SECRET)
+        api = tweepy.API(auth)
+        media = api.media_upload(filename='image.png', file=io.BytesIO(data))
+        return media.media_id
+    except Exception as e:
+        print(f'v1 upload failed, trying v2: {e}')
+    from requests_oauthlib import OAuth1
+    a = OAuth1(config.X_API_KEY, config.X_API_SECRET, config.X_ACCESS_TOKEN, config.X_ACCESS_SECRET)
+    r = requests.post('https://api.x.com/2/media/upload', auth=a, files={'media': ('image.png', data, 'image/png')})
     r.raise_for_status()
     j = r.json()
     return (j.get('data') or {}).get('id') or j.get('media_id_string')
