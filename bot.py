@@ -25,7 +25,7 @@ for _k in ['ANTHROPIC_API_KEY', 'X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', '
 HERE = Path(__file__).parent
 PHOTOS_DIR = HERE / 'photos'
 PERF_LOG = HERE / 'performance_log.json'
-
+ARTICLES_DIR = HERE / 'articles'
 
 def get_bitcoin_data(days=30):
     url = 'https://api.coingecko.com/api/v3/coins/bitcoin/ohlc'
@@ -66,13 +66,7 @@ def get_gold_data(days=30):
             j = r.json()
             p = j.get('price')
             if p:
-                rows.append({
-                    'date': pd.Timestamp(d),
-                    'open': float(j.get('open_price', p)),
-                    'high': float(j.get('high_price', p)),
-                    'low': float(j.get('low_price', p)),
-                    'close': float(p),
-                })
+                rows.append({'date': pd.Timestamp(d), 'open': float(j.get('open_price', p)), 'high': float(j.get('high_price', p)), 'low': float(j.get('low_price', p)), 'close': float(p)})
         except Exception:
             continue
     spot = _gold_spot()
@@ -88,15 +82,7 @@ def summarize(df, asset):
     week_ago = float(df['close'].iloc[-6]) if len(df) > 6 else float(df['close'].iloc[0])
     month_ago = float(df['close'].iloc[0])
     prev = float(df['close'].iloc[-2]) if len(df) > 1 else latest
-    return {
-        'asset': asset,
-        'latest': round(latest, 2),
-        'change_1d_pct': round((latest - prev) / prev * 100, 2),
-        'change_7d_pct': round((latest - week_ago) / week_ago * 100, 2),
-        'change_30d_pct': round((latest - month_ago) / month_ago * 100, 2),
-        'high_30d': round(float(df['high'].max()), 2),
-        'low_30d': round(float(df['low'].min()), 2),
-    }
+    return {'asset': asset, 'latest': round(latest, 2), 'change_1d_pct': round((latest - prev) / prev * 100, 2), 'change_7d_pct': round((latest - week_ago) / week_ago * 100, 2), 'change_30d_pct': round((latest - month_ago) / month_ago * 100, 2), 'high_30d': round(float(df['high'].max()), 2), 'low_30d': round(float(df['low'].min()), 2)}
 
 
 def round_levels(price):
@@ -167,26 +153,15 @@ def pick_story_image(hook):
 
 claude = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
-PERSONA = (
-    'You write X posts for Alexander (@xanderzone), a trader and entrepreneur. '
-    'Voice: confident, direct, a little provocative, reflective. Hooks hard in line one. '
-    'Style: short punchy lines, line breaks between thoughts, no hashtags, max 1 emoji. '
-    'HARD RULES: Everything is HIS PERSONAL VIEW (my read, the way I see it, I am watching). '
-    'NEVER give advice, never buy/sell/you should/get in/dont miss. '
-    'NEVER state predictions as fact; use scenarios (if X holds, I am watching Y). '
-    'No fake claims about results or wealth.'
-)
+PERSONA = ('You write X posts for Alexander (@xanderzone), a trader and entrepreneur. Voice: confident, direct, a little provocative, reflective. Hooks hard in line one. Style: short punchy lines, line breaks between thoughts, no hashtags, max 1 emoji. HARD RULES: Everything is HIS PERSONAL VIEW (my read, the way I see it, I am watching). NEVER give advice, never buy/sell/you should/get in/dont miss. NEVER state predictions as fact; use scenarios. No fake claims about results or wealth.')
 
-TONE = (
-    'Example tone for hot-takes: This might sound crazy, but there are guys that spent all year '
-    'telling you the four year cycle for Bitcoin was dumb, and when they were proven wrong, they did not '
-    'admit it, they just kept saying the market is wrong, and they are right. '
-    'Calling out narratives, ego, crowd psychology with a knowing smirk.'
-)
+TONE = ('Example tone for hot-takes: This might sound crazy, but there are guys that spent all year telling you the four year cycle for Bitcoin was dumb, and when they were proven wrong, they did not admit it, they just kept saying the market is wrong, and they are right. Calling out narratives, ego, crowd psychology with a knowing smirk.')
+
+ESSAY_VOICE = ('Write in an immersive, personal-essay voice. Very short paragraphs, often one sentence. Intentional white space between lines. A hook that pulls the reader in immediately. Build quietly, then land a calm, resonant insight at the end. Reflective, confident, never preachy, never salesy. No hashtags, no emojis, no advice, no fabricated personal trades or fake numbers. It is a mood and a way of thinking, not a brag.')
 
 
-def _ask(prompt, use_search=False):
-    kwargs = dict(model='claude-sonnet-4-6', max_tokens=800, system=PERSONA, messages=[{'role': 'user', 'content': prompt}])
+def _ask(prompt, use_search=False, max_tokens=900):
+    kwargs = dict(model='claude-sonnet-4-6', max_tokens=max_tokens, system=PERSONA, messages=[{'role': 'user', 'content': prompt}])
     if use_search:
         kwargs['tools'] = [{'type': 'web_search_20250305', 'name': 'web_search'}]
     m = claude.messages.create(**kwargs)
@@ -219,7 +194,29 @@ def gen_motivation(theme):
 
 
 def gen_trending():
-    return _ask('Search the web for what is trending in trading, gold, bitcoin, or macro markets in the last 24 hours. Pick the single most talked-about topic. Then write ONE classy, hooking X post giving MY personal take on it in the persona voice - opinionated but elegant, crowd-psychology angle welcome. Reference the topic clearly so readers know what I am talking about. No links, no hashtags. Under 270 chars. If the take involves markets, end EXACTLY: Not financial advice. Return ONLY the post text.', use_search=True)
+    return _ask('Search the web for what is trending RIGHT NOW in forex, crypto, and trading lifestyle in the last 24 hours. Pick the single most talked-about topic in those niches. Then write ONE classy, hooking X post giving MY personal take on it in the persona voice - opinionated but elegant, crowd-psychology angle welcome. Reference the topic clearly. No links, no hashtags. Under 270 chars. If it touches markets, end EXACTLY: Not financial advice. Return ONLY the post text.', use_search=True)
+
+
+def gen_essay(topic):
+    return _ask(f'{ESSAY_VOICE} Topic: {topic}. Write ONE long-form X post (an immersive essay) in that voice. Use short paragraphs with blank lines between them. Open with a hook, build quietly, end on a resonant one-line insight. 150 to 320 words. No hashtags, no emojis, no advice. Return ONLY the essay text.', max_tokens=1200)
+
+
+def gen_article(topic):
+    body = _ask(f'{ESSAY_VOICE} Topic: {topic}. Write a full long-form X ARTICLE (a personal essay, 500 to 800 words) in that immersive voice. Give it a short, magnetic title on the very first line, then a blank line, then the essay with short paragraphs and section breaks (use a single line with three dashes between sections). End on a quiet, resonant insight. No hashtags, no emojis, no advice, no fabricated trades or fake numbers. Return ONLY title and body.', max_tokens=2500)
+    return body
+
+
+def save_article(topic):
+    try:
+        ARTICLES_DIR.mkdir(exist_ok=True)
+        text = gen_article(topic)
+        fname = ARTICLES_DIR / f"{dt.date.today().isoformat()}.md"
+        fname.write_text(text)
+        print(f'ARTICLE DRAFT SAVED: {fname.name}')
+        return str(fname)
+    except Exception as e:
+        print(f'article save failed: {e}')
+        return None
 
 
 def log_levels(s):
@@ -302,6 +299,9 @@ def slot_1_market():
     else:
         tid = post_to_x(gen_market_post(s), chart)
         print(f"[slot1 market {asset}] {tid}")
+    # Sunday: also save a long-form article draft to the repo (GitHub emails you)
+    if dt.date.today().weekday() == 6:
+        save_article(random.choice(config.ESSAY_TOPICS))
 
 
 def slot_2_story():
@@ -321,6 +321,14 @@ def slot_2_story():
 
 
 def slot_3_motivation():
+    # ~2x per week this slot posts a reflective long-form essay instead of a short motivation line
+    if dt.date.today().weekday() in (1, 4):
+        topic = random.choice(config.ESSAY_TOPICS)
+        text = gen_essay(topic)
+        tid = post_to_x(text)
+        print(f"[slot3 essay] {tid}")
+        print(text)
+        return
     text = gen_motivation(random.choice(config.MOTIVATION_THEMES))
     tid = post_to_x(text)
     print(f"[slot3 motivation] {tid}")
