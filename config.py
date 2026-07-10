@@ -12,14 +12,18 @@ X_API_SECRET = "..."
 X_ACCESS_TOKEN = "..."
 X_ACCESS_SECRET = "..."
 
+# goldapi.io -> live XAU/USD spot price
+GOLD_API_KEY = "..."
+
 # ------------------------------------------------------------------
 # BRANDING
 # ------------------------------------------------------------------
 CHART_WATERMARK = "@xanderzone"
 
-# ------------------------------------------------------------------
-# SLOT 2 - story / hot-take themes (opinionated, narrative-calling tone)
-# ------------------------------------------------------------------
+
+# ----------------------------------------------------------------
+# SLOT 2 - story / hot-take themes
+# ----------------------------------------------------------------
 STORY_THEMES = [
     "people who mocked the Bitcoin four year cycle all year, got proven wrong, and still won't admit it",
     "traders who blame the market instead of their own risk management",
@@ -35,9 +39,9 @@ STORY_THEMES = [
     "backtests look easy because charts don't show the fear you felt live",
 ]
 
-# ------------------------------------------------------------------
-# SLOT 3 - motivational finance/mindset themes
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------
+# SLOT 3 - motivational themes
+# ----------------------------------------------------------------
 MOTIVATION_THEMES = [
     "discipline compounds faster than money",
     "the late nights staring at charts that nobody saw",
