@@ -28,6 +28,11 @@ PERF_LOG = HERE / 'performance_log.json'
 NEWS_LOG = HERE / 'news_log.json'
 ARTICLES_DIR = HERE / 'articles'
 
+ASSET_STYLE = {
+    'Gold':    {'pair': 'XAUUSD', 'accent': '#f5b301', 'badge': 'Au'},
+    'Bitcoin': {'pair': 'BTCUSD', 'accent': '#f7931a', 'badge': 'B'},
+}
+
 REPLY_BAIT = [
     'What level are you watching here?',
     'Am I wrong on this?',
@@ -82,7 +87,6 @@ def get_gold_data(days=30):
 
 
 def pick_primary_asset():
-    # Gold priority: BTC only every 3rd day, Gold otherwise
     if dt.date.today().toordinal() % 3 == 0:
         return 'Bitcoin', get_bitcoin_data()
     return 'Gold', get_gold_data()
@@ -109,10 +113,13 @@ def round_levels(price):
 
 
 def make_chart(df, stats, scenario=False):
+    style = ASSET_STYLE.get(stats['asset'], {'pair': stats['asset'].upper(), 'accent': '#3b82f6', 'badge': stats['asset'][0]})
+    accent = style['accent']
     d = df.tail(30).copy().reset_index(drop=True)
-    fig, ax = plt.subplots(figsize=(10, 5.6), dpi=160)
-    fig.patch.set_facecolor('#0d0d0f')
-    ax.set_facecolor('#0d0d0f')
+    fig, ax = plt.subplots(figsize=(10, 5.8), dpi=160)
+    fig.patch.set_facecolor('#0b0e13')
+    ax.set_facecolor('#0b0e13')
+    fig.subplots_adjust(top=0.82, left=0.06, right=0.97, bottom=0.10)
     x = mdates.date2num(d['date'].dt.to_pydatetime())
     w = (x[1] - x[0]) * 0.6 if len(x) > 1 else 0.6
     for xi, o, h, l, c in zip(x, d['open'], d['high'], d['low'], d['close']):
@@ -124,29 +131,37 @@ def make_chart(df, stats, scenario=False):
     below, above = round_levels(stats['latest'])
     if scenario:
         span = max(stats['latest'] * 0.004, (stats['high_30d'] - stats['low_30d']) * 0.02)
-        ax.axhspan(below - span, below + span, color='#22c55e', alpha=0.15, zorder=1)
-        ax.axhspan(above - span, above + span, color='#ef4444', alpha=0.15, zorder=1)
-        ax.axhline(below, color='#22c55e', ls='-', lw=1.2, alpha=0.8)
-        ax.axhline(above, color='#ef4444', ls='-', lw=1.2, alpha=0.8)
-        x1 = x[-1] if len(x) else 0
-        ax.text(x1, below, f'  watching {below:,.0f}', color='#22c55e', fontsize=10, fontweight='bold', va='bottom')
-        ax.text(x1, above, f'  watching {above:,.0f}', color='#ef4444', fontsize=10, fontweight='bold', va='bottom')
-    else:
-        for lv in (below, above):
-            ax.axhline(lv, color='#3b82f6', ls=':', lw=0.8, alpha=0.5)
-    ax.axhline(stats['high_30d'], color='#9ca3af', ls='--', lw=0.8, alpha=0.5)
-    ax.axhline(stats['low_30d'], color='#9ca3af', ls='--', lw=0.8, alpha=0.5)
+        ax.axhspan(below - span, below + span, color='#22c55e', alpha=0.12, zorder=1)
+        ax.axhspan(above - span, above + span, color='#ef4444', alpha=0.12, zorder=1)
+        ax.axhline(below, color='#22c55e', ls='-', lw=1.2, alpha=0.85)
+        ax.axhline(above, color='#ef4444', ls='-', lw=1.2, alpha=0.85)
+        x0 = x[0] if len(x) else 0
+        ax.text(x0, below, f' watching {below:,.0f}', color='#22c55e', fontsize=9.5, fontweight='bold', va='bottom')
+        ax.text(x0, above, f' watching {above:,.0f}', color='#ef4444', fontsize=9.5, fontweight='bold', va='bottom')
+    ax.axhline(stats['high_30d'], color='#6b7280', ls='--', lw=0.7, alpha=0.5)
+    ax.axhline(stats['low_30d'], color='#6b7280', ls='--', lw=0.7, alpha=0.5)
+    # live price tag on last candle
+    if len(x):
+        last_c = float(d['close'].iloc[-1])
+        ax.scatter([x[-1]], [last_c], s=36, color=accent, zorder=6)
+        ax.annotate(f"${stats['latest']:,.2f}", xy=(x[-1], last_c), xytext=(10, 0), textcoords='offset points', color='#0b0e13', fontsize=10, fontweight='bold', va='center', bbox=dict(boxstyle='round,pad=0.32', fc=accent, ec='none'), zorder=7)
+    # asset badge + header
+    ax.scatter([0.030], [1.12], s=1500, transform=ax.transAxes, color=accent, zorder=8, clip_on=False)
+    ax.text(0.030, 1.12, style['badge'], transform=ax.transAxes, color='#0b0e13', fontsize=13, fontweight='bold', ha='center', va='center', zorder=9)
     sign = '+' if stats['change_30d_pct'] >= 0 else ''
-    ax.set_title(f"{stats['asset']}  -  ${stats['latest']:,.2f}  ({sign}{stats['change_30d_pct']}% / 30d)", color='white', fontsize=15, fontweight='bold', loc='left', pad=14)
-    ax.text(1.0, 1.02, config.CHART_WATERMARK, transform=ax.transAxes, color='#9ca3af', fontsize=11, fontweight='bold', ha='right')
+    chg_col = '#22c55e' if stats['change_30d_pct'] >= 0 else '#ef4444'
+    ax.text(0.075, 1.155, f"{style['pair']}", transform=ax.transAxes, color='white', fontsize=17, fontweight='bold', va='center')
+    ax.text(0.075, 1.075, f"live spot  ·  30d candles  ·  {dt.date.today().strftime('%d %b %Y')}", transform=ax.transAxes, color='#9ca3af', fontsize=9.5, va='center')
+    ax.text(0.97, 1.155, f"{sign}{stats['change_30d_pct']}%", transform=ax.transAxes, color=chg_col, fontsize=15, fontweight='bold', ha='right', va='center')
+    ax.text(0.97, 1.075, '30-day move', transform=ax.transAxes, color='#9ca3af', fontsize=9, ha='right', va='center')
+    ax.text(0.99, 0.02, config.CHART_WATERMARK, transform=ax.transAxes, color='#6b7280', fontsize=11, fontweight='bold', ha='right')
     ax.tick_params(colors='#9ca3af', labelsize=9)
     for s in ax.spines.values():
         s.set_visible(False)
-    ax.grid(color='#1f2937', lw=0.4, alpha=0.5)
+    ax.grid(color='#171e2b', lw=0.5, alpha=0.8)
     ax.xaxis_date()
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b'))
     buf = BytesIO()
-    plt.tight_layout()
     plt.savefig(buf, format='png', facecolor=fig.get_facecolor())
     plt.close(fig)
     buf.seek(0)
@@ -156,12 +171,12 @@ def make_chart(df, stats, scenario=False):
 def make_quote_card(hook):
     import textwrap
     fig, ax = plt.subplots(figsize=(10, 5.6), dpi=160)
-    fig.patch.set_facecolor('#0d0d0f')
-    ax.set_facecolor('#0d0d0f')
+    fig.patch.set_facecolor('#0b0e13')
+    ax.set_facecolor('#0b0e13')
     ax.axis('off')
     ax.text(0.5, 0.55, '\n'.join(textwrap.wrap(hook, width=34)), ha='center', va='center', color='white', fontsize=22, fontweight='bold', linespacing=1.6)
     ax.text(0.5, 0.08, config.CHART_WATERMARK, ha='center', color='#9ca3af', fontsize=12, fontweight='bold')
-    ax.plot([0.42, 0.58], [0.22, 0.22], color='#22c55e', lw=2, transform=ax.transAxes)
+    ax.plot([0.42, 0.58], [0.22, 0.22], color='#f5b301', lw=2, transform=ax.transAxes)
     buf = BytesIO()
     plt.tight_layout()
     plt.savefig(buf, format='png', facecolor=fig.get_facecolor())
@@ -219,7 +234,7 @@ def check_news():
     except Exception:
         pass
     price_line = f' Live gold spot right now: ${spot:,.2f}.' if spot else ''
-    raw = _ask(f"Search the web for BREAKING or major news from the last 3 hours that directly impacts GOLD (XAUUSD) or BITCOIN prices - things like Fed decisions, CPI/inflation surprises, war escalation, major ETF flows, exchange failures, huge liquidations, central bank gold buying.{price_line} Topics already covered (do NOT repeat these): {seen_topics[-25:]}. STRICT BAR: only genuinely HIGH-impact, market-moving news qualifies. If nothing meets that bar, reply with exactly NO_NEWS and nothing else. If one does: first line exactly 'TOPIC: <4-6 word unique key>'. Then a blank line. Then ONE X post: casual insider reaction, NOT news-channel style - like you just saw it and are thinking out loud: what happened in one tight line, then 'my read:' on how this likely hits gold or BTC (scenario language, reference the live price if gold). Confident, classy, human. No links, no hashtags. Under 270 chars. End EXACTLY: Not financial advice. ", use_search=True, max_tokens=800)
+    raw = _ask(f"Search the web for BREAKING or major news from the last 6 hours that directly impacts GOLD (XAUUSD) or BITCOIN prices - Fed decisions, CPI/inflation surprises, war escalation, major ETF flows, exchange failures, huge liquidations, central bank gold buying.{price_line} Topics already covered (do NOT repeat): {seen_topics[-25:]}. STRICT BAR: only genuinely HIGH-impact, market-moving news qualifies. If nothing meets that bar, reply with exactly NO_NEWS and nothing else. If one does: first line exactly 'TOPIC: <4-6 word unique key>'. Then a blank line. Then ONE X post: MY THOUGHTS on that news - casual insider reaction, like I just saw it and am thinking out loud. One tight line on what happened, then 'my read:' on how this likely hits gold or BTC (scenario language, weave in the live gold price if relevant). Confident, classy, human - NOT news-channel style. No links, no hashtags. Under 270 chars. End EXACTLY: Not financial advice.", use_search=True, max_tokens=800)
     if 'NO_NEWS' in raw[:40]:
         print('news check: nothing major')
         return
