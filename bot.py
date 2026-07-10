@@ -94,7 +94,7 @@ def round_levels(price):
     return below, below + step
 
 
-def make_chart(df, stats):
+def make_chart(df, stats, scenario=False):
     d = df.tail(30).copy().reset_index(drop=True)
     fig, ax = plt.subplots(figsize=(10, 5.6), dpi=160)
     fig.patch.set_facecolor('#0d0d0f')
@@ -107,11 +107,21 @@ def make_chart(df, stats):
         ax.plot([xi, xi], [l, h], color=col, linewidth=1.0, zorder=2)
         lo, hi = (o, c) if up else (c, o)
         ax.add_patch(plt.Rectangle((xi - w / 2, lo), w, max(hi - lo, 0.01), facecolor=col, edgecolor=col, zorder=3))
+    below, above = round_levels(stats['latest'])
+    if scenario:
+        span = max(stats['latest'] * 0.004, (stats['high_30d'] - stats['low_30d']) * 0.02)
+        ax.axhspan(below - span, below + span, color='#22c55e', alpha=0.15, zorder=1)
+        ax.axhspan(above - span, above + span, color='#ef4444', alpha=0.15, zorder=1)
+        ax.axhline(below, color='#22c55e', ls='-', lw=1.2, alpha=0.8)
+        ax.axhline(above, color='#ef4444', ls='-', lw=1.2, alpha=0.8)
+        x1 = x[-1] if len(x) else 0
+        ax.text(x1, below, f'  watching {below:,.0f}', color='#22c55e', fontsize=10, fontweight='bold', va='bottom')
+        ax.text(x1, above, f'  watching {above:,.0f}', color='#ef4444', fontsize=10, fontweight='bold', va='bottom')
+    else:
+        for lv in (below, above):
+            ax.axhline(lv, color='#3b82f6', ls=':', lw=0.8, alpha=0.5)
     ax.axhline(stats['high_30d'], color='#9ca3af', ls='--', lw=0.8, alpha=0.5)
     ax.axhline(stats['low_30d'], color='#9ca3af', ls='--', lw=0.8, alpha=0.5)
-    below, above = round_levels(stats['latest'])
-    for lv in (below, above):
-        ax.axhline(lv, color='#3b82f6', ls=':', lw=0.8, alpha=0.5)
     sign = '+' if stats['change_30d_pct'] >= 0 else ''
     ax.set_title(f"{stats['asset']}  -  ${stats['latest']:,.2f}  ({sign}{stats['change_30d_pct']}% / 30d)", color='white', fontsize=15, fontweight='bold', loc='left', pad=14)
     ax.text(1.0, 1.02, config.CHART_WATERMARK, transform=ax.transAxes, color='#9ca3af', fontsize=11, fontweight='bold', ha='right')
@@ -156,7 +166,7 @@ def pick_story_image(hook):
 
 claude = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
-PERSONA = ('You write X posts for Alexander (@xanderzone), a trader and entrepreneur. Voice: confident, direct, a little provocative, reflective. The FIRST LINE must be a scroll-stopping hook - a bold claim, a sharp question, or a pattern-interrupt that makes people stop and read. Style: short punchy lines, line breaks between thoughts, no hashtags, max 1 emoji. HARD RULES: Everything is HIS PERSONAL VIEW (my read, the way I see it, I am watching). NEVER give advice, never buy/sell/you should/get in/dont miss. NEVER state predictions as fact; use scenarios. No fake claims about results or wealth. NEVER use hashtags - they reduce reach.')
+PERSONA = ('You write X posts for Alexander (@xanderzone), a trader and entrepreneur. Voice: confident, direct, a little provocative, reflective. The FIRST LINE must be a scroll-stopping hook - a bold claim, a sharp question, or a pattern-interrupt that makes people stop and read. Style: short punchy lines, line breaks between thoughts, no hashtags, max 1 emoji. HARD RULES: Everything is HIS PERSONAL VIEW (my read, the way I see it, I am watching). NEVER give advice, never buy/sell/you should/get in/dont miss. NEVER give entries, stop losses, take profits, or position sizes. NEVER state predictions as fact; use scenarios. No fake claims about results or wealth. NEVER use hashtags - they reduce reach.')
 
 TONE = ('Example tone for hot-takes: This might sound crazy, but there are guys that spent all year telling you the four year cycle for Bitcoin was dumb, and when they were proven wrong, they did not admit it, they just kept saying the market is wrong, and they are right. Calling out narratives, ego, crowd psychology with a knowing smirk.')
 
@@ -183,9 +193,14 @@ def maybe_reply_bait(text):
     return text
 
 
-def gen_market_post(s):
+def gen_scenario_post(s):
     below, above = round_levels(s['latest'])
-    return _ask(f"Live {s['asset']} spot. Price now ${s['latest']:,.2f}, 7d {s['change_7d_pct']}%, 30d {s['change_30d_pct']}%. 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Round levels ${below:,.0f} below, ${above:,.0f} above. Write ONE X post: a scroll-stopping hook first line, then a hooking personal read, reference the real price and one round level, scenario thinking only, under 250 chars, end EXACTLY: Not financial advice. Return ONLY the post text.")
+    return _ask(f"Live {s['asset']} spot: ${s['latest']:,.2f}. Support zone I marked: ${below:,.0f}. Resistance zone I marked: ${above:,.0f}. 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}, 1d move {s['change_1d_pct']}%. Write ONE X post in this exact structure: scroll-stopping hook line about {s['asset']} at this price. Then MY two-sided scenario read: if the ${below:,.0f} zone holds, what path opens; if it breaks, where the flush likely goes. Frame ONLY as levels I am watching, explicitly say these are levels I am watching, not trades I am giving. NO entries, NO stop loss, NO take profit, NO advice. Under 270 chars. End EXACTLY: Not financial advice. Return ONLY the post text.")
+
+
+def gen_followup_post(entry, s):
+    outcome = 'held and the upper zone got tagged' if entry['resolved'] == 'hit_above' else 'broke and price flushed lower'
+    return _ask(f"On {entry['date']} I publicly marked {entry['asset']} levels: watching ${entry['watch_below']:,.0f} below and ${entry['watch_above']:,.0f} above, price then ${entry['price']:,.2f}. Since then the level {outcome}. Price now ${s['latest']:,.2f}. Write ONE honest, classy X post reflecting on how that public read aged - confident if it played out, gracefully honest if it did not. The tone: the level did the work, I just watched it. No gloating, no fake wins, no advice. Under 260 chars. End EXACTLY: Not financial advice. Return ONLY the post text.")
 
 
 def gen_weekly_recap(s):
@@ -194,7 +209,7 @@ def gen_weekly_recap(s):
 
 def gen_thread(s):
     below, above = round_levels(s['latest'])
-    raw = _ask(f"{s['asset']} just moved {s['change_1d_pct']}% today to ${s['latest']:,.2f}. 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Round levels ${below:,.0f}/${above:,.0f}. Write a 3-tweet X THREAD breaking down the move (scroll-stopping hook, personal read, scenarios, what you are watching). Separate the 3 tweets with a line containing only three dashes. Each tweet under 270 chars. Last tweet ends EXACTLY: Not financial advice. Return ONLY the tweets.")
+    raw = _ask(f"{s['asset']} just moved {s['change_1d_pct']}% today to ${s['latest']:,.2f}. 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Zones I marked: ${below:,.0f}/${above:,.0f}. Write a 3-tweet X THREAD breaking down the move (scroll-stopping hook, personal read, two-sided scenarios around my marked zones, what I am watching next). NO entries, stops, or targets - only levels I am watching. Separate the 3 tweets with a line containing only three dashes. Each tweet under 270 chars. Last tweet ends EXACTLY: Not financial advice. Return ONLY the tweets.")
     parts = [p.strip() for p in raw.split('---') if p.strip()]
     return parts[:3] if parts else [raw]
 
@@ -238,14 +253,31 @@ def log_levels(s):
     except Exception:
         data = []
     below, above = round_levels(s['latest'])
-    data.append({'date': dt.date.today().isoformat(), 'asset': s['asset'], 'price': s['latest'], 'watch_below': below, 'watch_above': above, 'resolved': None})
+    newly_resolved = []
     for e in data:
-        if e['resolved'] is None and e['asset'] == s['asset'] and e['date'] != dt.date.today().isoformat():
+        if e.get('resolved') is None and e['asset'] == s['asset'] and e['date'] != dt.date.today().isoformat():
             if s['latest'] >= e['watch_above']:
                 e['resolved'] = 'hit_above'
+                if not e.get('announced'):
+                    newly_resolved.append(e)
             elif s['latest'] <= e['watch_below']:
                 e['resolved'] = 'hit_below'
+                if not e.get('announced'):
+                    newly_resolved.append(e)
+    data.append({'date': dt.date.today().isoformat(), 'asset': s['asset'], 'price': s['latest'], 'watch_below': below, 'watch_above': above, 'resolved': None, 'announced': False})
     try:
+        PERF_LOG.write_text(json.dumps(data[-200:], indent=2))
+    except Exception:
+        pass
+    return newly_resolved
+
+
+def mark_announced(entry):
+    try:
+        data = json.loads(PERF_LOG.read_text()) if PERF_LOG.exists() else []
+        for e in data:
+            if e['date'] == entry['date'] and e['asset'] == entry['asset'] and e['price'] == entry['price']:
+                e['announced'] = True
         PERF_LOG.write_text(json.dumps(data[-200:], indent=2))
     except Exception:
         pass
@@ -300,8 +332,20 @@ def slot_1_market():
     else:
         asset, df = 'Bitcoin', get_bitcoin_data()
     s = summarize(df, asset)
-    log_levels(s)
-    chart = make_chart(df, s)
+    resolved = log_levels(s)
+    # honest follow-up first: how did my last public levels age?
+    if resolved:
+        entry = resolved[0]
+        try:
+            fu = gen_followup_post(entry, s)
+            chart_fu = make_chart(df, s, scenario=True)
+            tid = post_to_x(fu, chart_fu)
+            mark_announced(entry)
+            print(f"[slot1 followup {asset}] {tid}")
+            print(fu)
+        except Exception as e:
+            print(f'followup failed: {e}')
+    chart = make_chart(df, s, scenario=True)
     if abs(s['change_1d_pct']) >= 2.0:
         tweets = gen_thread(s)
         tid = post_thread(tweets, image_buf=chart)
@@ -310,14 +354,28 @@ def slot_1_market():
         tid = post_to_x(maybe_reply_bait(gen_weekly_recap(s)), chart)
         print(f"[slot1 recap {asset}] {tid}")
     else:
-        tid = post_to_x(maybe_reply_bait(gen_market_post(s)), chart)
-        print(f"[slot1 market {asset}] {tid}")
+        tid = post_to_x(maybe_reply_bait(gen_scenario_post(s)), chart)
+        print(f"[slot1 scenario {asset}] {tid}")
     if dt.date.today().weekday() == 6:
         save_article(random.choice(config.ESSAY_TOPICS))
 
 
 def slot_2_story():
-    if random.random() < 0.4:
+    # second market read of the day ~50% of the time (the other asset), else trending/story
+    if random.random() < 0.5:
+        try:
+            if dt.date.today().toordinal() % 2 == 0:
+                asset, df = 'Bitcoin', get_bitcoin_data()
+            else:
+                asset, df = 'Gold', get_gold_data()
+            s = summarize(df, asset)
+            chart = make_chart(df, s, scenario=True)
+            tid = post_to_x(maybe_reply_bait(gen_scenario_post(s)), chart)
+            print(f"[slot2 scenario {asset}] {tid}")
+            return
+        except Exception as e:
+            print(f'second scenario failed, falling back: {e}')
+    if random.random() < 0.5:
         try:
             text = gen_trending()
             tid = post_to_x(maybe_reply_bait(text), pick_story_image(text.split('\n')[0]))
