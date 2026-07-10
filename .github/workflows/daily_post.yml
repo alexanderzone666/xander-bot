@@ -2,12 +2,15 @@ name: X Content Engine
 
 on:
   schedule:
-    - cron: "0 7-22 * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       slot:
         description: "Force a post now: 1=market, 2=story, 3=motivation"
         required: false
+
+permissions:
+  contents: write
 
 jobs:
   post:
@@ -25,14 +28,9 @@ jobs:
           else
             echo "result=$(python scheduler.py)" >> $GITHUB_OUTPUT
           fi
-      - name: Stop if not a posting hour
-        if: contains(steps.plan.outputs.result, 'skip')
-        run: echo "Not a posting hour today. Exiting."
       - name: Install dependencies
-        if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
         run: pip install anthropic tweepy matplotlib pandas requests requests-oauthlib
       - name: Write secrets config
-        if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
         run: |
           python - << 'EOF'
           import os, re
@@ -48,6 +46,9 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           GOLD_API_KEY: ${{ secrets.GOLD_API_KEY }}
+      - name: Breaking news check
+        continue-on-error: true
+        run: python bot.py --news
       - name: Wait then post
         if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
         run: |
@@ -57,3 +58,12 @@ jobs:
           echo "Posting slot $SLOT after $DELAY min delay"
           sleep $((DELAY * 60))
           python bot.py --slot $SLOT
+      - name: Save state back to repo
+        if: always()
+        continue-on-error: true
+        run: |
+          git config user.name "xander-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -- config.py
+          git add -A performance_log.json news_log.json articles/ 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "bot: update state" && git push)
