@@ -28,11 +28,6 @@ PERF_LOG = HERE / 'performance_log.json'
 NEWS_LOG = HERE / 'news_log.json'
 ARTICLES_DIR = HERE / 'articles'
 
-ASSET_STYLE = {
-    'Gold':    {'pair': 'XAUUSD', 'accent': '#f5b301', 'badge': 'Au'},
-    'Bitcoin': {'pair': 'BTCUSD', 'accent': '#f7931a', 'badge': 'B'},
-}
-
 REPLY_BAIT = [
     'What level are you watching here?',
     'Am I wrong on this?',
@@ -112,55 +107,58 @@ def round_levels(price):
     return below, below + step
 
 
+UP_C = '#16c784'
+DN_C = '#ea3943'
+BG_C = '#0b0e13'
+
+
 def make_chart(df, stats, scenario=False):
-    style = ASSET_STYLE.get(stats['asset'], {'pair': stats['asset'].upper(), 'accent': '#3b82f6', 'badge': stats['asset'][0]})
-    accent = style['accent']
     d = df.tail(30).copy().reset_index(drop=True)
-    fig, ax = plt.subplots(figsize=(10, 5.8), dpi=160)
-    fig.patch.set_facecolor('#0b0e13')
-    ax.set_facecolor('#0b0e13')
-    fig.subplots_adjust(top=0.82, left=0.06, right=0.97, bottom=0.10)
+    fig = plt.figure(figsize=(10, 5.8), dpi=170)
+    fig.patch.set_facecolor(BG_C)
+    ax = fig.add_axes([0.07, 0.11, 0.86, 0.64])
+    ax.set_facecolor(BG_C)
     x = mdates.date2num(d['date'].dt.to_pydatetime())
-    w = (x[1] - x[0]) * 0.6 if len(x) > 1 else 0.6
+    w = (x[1] - x[0]) * 0.55 if len(x) > 1 else 0.55
     for xi, o, h, l, c in zip(x, d['open'], d['high'], d['low'], d['close']):
         up = c >= o
-        col = '#22c55e' if up else '#ef4444'
-        ax.plot([xi, xi], [l, h], color=col, linewidth=1.0, zorder=2)
+        col = UP_C if up else DN_C
+        ax.plot([xi, xi], [l, h], color=col, lw=0.9, alpha=0.95, zorder=2, solid_capstyle='round')
         lo, hi = (o, c) if up else (c, o)
-        ax.add_patch(plt.Rectangle((xi - w / 2, lo), w, max(hi - lo, 0.01), facecolor=col, edgecolor=col, zorder=3))
+        ax.add_patch(plt.Rectangle((xi - w / 2, lo), w, max(hi - lo, 0.01), facecolor=col, edgecolor='none', zorder=3))
     below, above = round_levels(stats['latest'])
     if scenario:
         span = max(stats['latest'] * 0.004, (stats['high_30d'] - stats['low_30d']) * 0.02)
-        ax.axhspan(below - span, below + span, color='#22c55e', alpha=0.12, zorder=1)
-        ax.axhspan(above - span, above + span, color='#ef4444', alpha=0.12, zorder=1)
-        ax.axhline(below, color='#22c55e', ls='-', lw=1.2, alpha=0.85)
-        ax.axhline(above, color='#ef4444', ls='-', lw=1.2, alpha=0.85)
-        x0 = x[0] if len(x) else 0
-        ax.text(x0, below, f' watching {below:,.0f}', color='#22c55e', fontsize=9.5, fontweight='bold', va='bottom')
-        ax.text(x0, above, f' watching {above:,.0f}', color='#ef4444', fontsize=9.5, fontweight='bold', va='bottom')
-    ax.axhline(stats['high_30d'], color='#6b7280', ls='--', lw=0.7, alpha=0.5)
-    ax.axhline(stats['low_30d'], color='#6b7280', ls='--', lw=0.7, alpha=0.5)
-    # live price tag on last candle
-    if len(x):
-        last_c = float(d['close'].iloc[-1])
-        ax.scatter([x[-1]], [last_c], s=36, color=accent, zorder=6)
-        ax.annotate(f"${stats['latest']:,.2f}", xy=(x[-1], last_c), xytext=(10, 0), textcoords='offset points', color='#0b0e13', fontsize=10, fontweight='bold', va='center', bbox=dict(boxstyle='round,pad=0.32', fc=accent, ec='none'), zorder=7)
-    # asset badge + header
-    ax.scatter([0.030], [1.12], s=1500, transform=ax.transAxes, color=accent, zorder=8, clip_on=False)
-    ax.text(0.030, 1.12, style['badge'], transform=ax.transAxes, color='#0b0e13', fontsize=13, fontweight='bold', ha='center', va='center', zorder=9)
-    sign = '+' if stats['change_30d_pct'] >= 0 else ''
-    chg_col = '#22c55e' if stats['change_30d_pct'] >= 0 else '#ef4444'
-    ax.text(0.075, 1.155, f"{style['pair']}", transform=ax.transAxes, color='white', fontsize=17, fontweight='bold', va='center')
-    ax.text(0.075, 1.075, f"live spot  ·  30d candles  ·  {dt.date.today().strftime('%d %b %Y')}", transform=ax.transAxes, color='#9ca3af', fontsize=9.5, va='center')
-    ax.text(0.97, 1.155, f"{sign}{stats['change_30d_pct']}%", transform=ax.transAxes, color=chg_col, fontsize=15, fontweight='bold', ha='right', va='center')
-    ax.text(0.97, 1.075, '30-day move', transform=ax.transAxes, color='#9ca3af', fontsize=9, ha='right', va='center')
-    ax.text(0.99, 0.02, config.CHART_WATERMARK, transform=ax.transAxes, color='#6b7280', fontsize=11, fontweight='bold', ha='right')
-    ax.tick_params(colors='#9ca3af', labelsize=9)
+        ax.axhspan(below - span, below + span, color=UP_C, alpha=0.10, zorder=1)
+        ax.axhspan(above - span, above + span, color=DN_C, alpha=0.10, zorder=1)
+        ax.axhline(below, color=UP_C, lw=1.0, alpha=0.75)
+        ax.axhline(above, color=DN_C, lw=1.0, alpha=0.75)
+        ax.text(x[0], below, f' {below:,.0f}  support watch ', color=BG_C, fontsize=8.5, fontweight='bold', va='center', zorder=6, bbox=dict(boxstyle='round,pad=0.32', fc=UP_C, ec='none'))
+        ax.text(x[0], above, f' {above:,.0f}  resistance watch ', color='white', fontsize=8.5, fontweight='bold', va='center', zorder=6, bbox=dict(boxstyle='round,pad=0.32', fc=DN_C, ec='none'))
+    lp = stats['latest']
+    ax.axhline(lp, color='#8b93a7', ls=(0, (2, 3)), lw=0.8, alpha=0.7)
+    ax.text(x[-1], lp, f' {lp:,.2f} ', color=BG_C, fontsize=9, fontweight='bold', va='center', ha='left', zorder=6, bbox=dict(boxstyle='round,pad=0.28', fc='#e8eaf0', ec='none'))
+    ax.text(0.5, 0.5, config.CHART_WATERMARK, transform=ax.transAxes, color='white', alpha=0.06, fontsize=46, fontweight='bold', ha='center', va='center', zorder=1)
+    ax.tick_params(colors='#6b7280', labelsize=8.5, length=0)
     for s in ax.spines.values():
         s.set_visible(False)
-    ax.grid(color='#171e2b', lw=0.5, alpha=0.8)
+    ax.grid(color='#161b25', lw=0.6)
+    ax.set_axisbelow(True)
     ax.xaxis_date()
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b'))
+    if stats['asset'] == 'Gold':
+        sym, badge_c, tick = 'Au', '#f5c542', 'XAUUSD'
+    else:
+        sym, badge_c, tick = '\u20bf', '#f7931a', 'BTCUSD'
+    fig.text(0.075, 0.895, ' ' + sym + ' ', fontsize=14, fontweight='bold', color=BG_C, bbox=dict(boxstyle='circle,pad=0.34', fc=badge_c, ec='none'))
+    fig.text(0.135, 0.915, stats['asset'], fontsize=16, fontweight='bold', color='white')
+    fig.text(0.135, 0.878, tick + '  \u00b7  live spot', fontsize=9, color='#8b93a7')
+    sign = '+' if stats['change_1d_pct'] >= 0 else ''
+    pill_c = UP_C if stats['change_1d_pct'] >= 0 else DN_C
+    fig.text(0.93, 0.915, f"${stats['latest']:,.2f}", fontsize=17, fontweight='bold', color='white', ha='right')
+    fig.text(0.93, 0.872, f" {sign}{stats['change_1d_pct']}% today ", fontsize=9.5, fontweight='bold', color='white', ha='right', bbox=dict(boxstyle='round,pad=0.3', fc=pill_c, ec='none'))
+    fig.text(0.93, 0.035, config.CHART_WATERMARK, fontsize=10.5, fontweight='bold', color='#8b93a7', ha='right')
+    fig.text(0.07, 0.035, dt.datetime.now(dt.timezone.utc).strftime('%d %b %Y \u00b7 %H:%M UTC'), fontsize=8.5, color='#5b6270')
     buf = BytesIO()
     plt.savefig(buf, format='png', facecolor=fig.get_facecolor())
     plt.close(fig)
@@ -171,12 +169,12 @@ def make_chart(df, stats, scenario=False):
 def make_quote_card(hook):
     import textwrap
     fig, ax = plt.subplots(figsize=(10, 5.6), dpi=160)
-    fig.patch.set_facecolor('#0b0e13')
-    ax.set_facecolor('#0b0e13')
+    fig.patch.set_facecolor(BG_C)
+    ax.set_facecolor(BG_C)
     ax.axis('off')
     ax.text(0.5, 0.55, '\n'.join(textwrap.wrap(hook, width=34)), ha='center', va='center', color='white', fontsize=22, fontweight='bold', linespacing=1.6)
-    ax.text(0.5, 0.08, config.CHART_WATERMARK, ha='center', color='#9ca3af', fontsize=12, fontweight='bold')
-    ax.plot([0.42, 0.58], [0.22, 0.22], color='#f5b301', lw=2, transform=ax.transAxes)
+    ax.text(0.5, 0.08, config.CHART_WATERMARK, ha='center', color='#8b93a7', fontsize=12, fontweight='bold')
+    ax.plot([0.42, 0.58], [0.22, 0.22], color=UP_C, lw=2, transform=ax.transAxes)
     buf = BytesIO()
     plt.tight_layout()
     plt.savefig(buf, format='png', facecolor=fig.get_facecolor())
@@ -234,7 +232,7 @@ def check_news():
     except Exception:
         pass
     price_line = f' Live gold spot right now: ${spot:,.2f}.' if spot else ''
-    raw = _ask(f"Search the web for BREAKING or major news from the last 6 hours that directly impacts GOLD (XAUUSD) or BITCOIN prices - Fed decisions, CPI/inflation surprises, war escalation, major ETF flows, exchange failures, huge liquidations, central bank gold buying.{price_line} Topics already covered (do NOT repeat): {seen_topics[-25:]}. STRICT BAR: only genuinely HIGH-impact, market-moving news qualifies. If nothing meets that bar, reply with exactly NO_NEWS and nothing else. If one does: first line exactly 'TOPIC: <4-6 word unique key>'. Then a blank line. Then ONE X post: MY THOUGHTS on that news - casual insider reaction, like I just saw it and am thinking out loud. One tight line on what happened, then 'my read:' on how this likely hits gold or BTC (scenario language, weave in the live gold price if relevant). Confident, classy, human - NOT news-channel style. No links, no hashtags. Under 270 chars. End EXACTLY: Not financial advice.", use_search=True, max_tokens=800)
+    raw = _ask(f"Search the web for BREAKING or major news from the last 3 hours that directly impacts GOLD (XAUUSD) or BITCOIN prices - things like Fed decisions, CPI/inflation surprises, war escalation, major ETF flows, exchange failures, huge liquidations, central bank gold buying.{price_line} Topics already covered (do NOT repeat these): {seen_topics[-25:]}. STRICT BAR: only genuinely HIGH-impact, market-moving news qualifies. If nothing meets that bar, reply with exactly NO_NEWS and nothing else. If one does: first line exactly 'TOPIC: <4-6 word unique key>'. Then a blank line. Then ONE X post: casual insider reaction, NOT news-channel style - like you just saw it and are thinking out loud: what happened in one tight line, then 'my read:' on how this likely hits gold or BTC (scenario language, reference the live price if gold). Confident, classy, human. No links, no hashtags. Under 270 chars. End EXACTLY: Not financial advice. ", use_search=True, max_tokens=800)
     if 'NO_NEWS' in raw[:40]:
         print('news check: nothing major')
         return
