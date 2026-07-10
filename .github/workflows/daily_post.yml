@@ -46,9 +46,15 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           GOLD_API_KEY: ${{ secrets.GOLD_API_KEY }}
-      - name: Breaking news check
+      - name: Breaking news check (every 6h)
         continue-on-error: true
-        run: python bot.py --news
+        run: |
+          H=$(date -u +%H)
+          if [ -n "${{ github.event.inputs.slot }}" ] || [ $((10#$H % 6)) -eq 0 ]; then
+            python bot.py --news
+          else
+            echo "news check skipped this hour (runs at 00/06/12/18 UTC)"
+          fi
       - name: Wait then post
         if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
         run: |
