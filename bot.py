@@ -25,6 +25,7 @@ for _k in ['ANTHROPIC_API_KEY', 'X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', '
 HERE = Path(__file__).parent
 PHOTOS_DIR = HERE / 'photos'
 PERF_LOG = HERE / 'performance_log.json'
+NEWS_LOG = HERE / 'news_log.json'
 ARTICLES_DIR = HERE / 'articles'
 
 REPLY_BAIT = [
@@ -78,6 +79,19 @@ def get_gold_data(days=30):
         p = spot['price']
         rows = [{'date': pd.Timestamp(today - dt.timedelta(days=i)), 'open': p, 'high': p, 'low': p, 'close': p} for i in range(days, -1, -1)]
     return pd.DataFrame(rows)
+
+
+def pick_primary_asset():
+    # Gold priority: BTC only every 3rd day, Gold otherwise
+    if dt.date.today().toordinal() % 3 == 0:
+        return 'Bitcoin', get_bitcoin_data()
+    return 'Gold', get_gold_data()
+
+
+def pick_secondary_asset():
+    if dt.date.today().toordinal() % 3 == 0:
+        return 'Gold', get_gold_data()
+    return 'Bitcoin', get_bitcoin_data()
 
 
 def summarize(df, asset):
@@ -191,6 +205,41 @@ def maybe_reply_bait(text):
     if random.random() < 0.30:
         return text + '\n\n' + random.choice(REPLY_BAIT)
     return text
+
+
+def check_news():
+    try:
+        seen = json.loads(NEWS_LOG.read_text()) if NEWS_LOG.exists() else []
+    except Exception:
+        seen = []
+    seen_topics = [e.get('topic','') for e in seen]
+    spot = None
+    try:
+        spot = _gold_spot()['price']
+    except Exception:
+        pass
+    price_line = f' Live gold spot right now: ${spot:,.2f}.' if spot else ''
+    raw = _ask(f"Search the web for BREAKING or major news from the last 3 hours that directly impacts GOLD (XAUUSD) or BITCOIN prices - things like Fed decisions, CPI/inflation surprises, war escalation, major ETF flows, exchange failures, huge liquidations, central bank gold buying.{price_line} Topics already covered (do NOT repeat these): {seen_topics[-25:]}. STRICT BAR: only genuinely HIGH-impact, market-moving news qualifies. If nothing meets that bar, reply with exactly NO_NEWS and nothing else. If one does: first line exactly 'TOPIC: <4-6 word unique key>'. Then a blank line. Then ONE X post: casual insider reaction, NOT news-channel style - like you just saw it and are thinking out loud: what happened in one tight line, then 'my read:' on how this likely hits gold or BTC (scenario language, reference the live price if gold). Confident, classy, human. No links, no hashtags. Under 270 chars. End EXACTLY: Not financial advice. ", use_search=True, max_tokens=800)
+    if 'NO_NEWS' in raw[:40]:
+        print('news check: nothing major')
+        return
+    lines = raw.split('\n')
+    topic = ''
+    body = raw
+    if lines and lines[0].strip().upper().startswith('TOPIC:'):
+        topic = lines[0].split(':', 1)[1].strip()[:80]
+        body = '\n'.join(lines[1:]).strip()
+    if topic and any(topic.lower() == t.lower() for t in seen_topics):
+        print(f'news check: duplicate topic {topic}')
+        return
+    tid = post_to_x(body)
+    print(f'[NEWS] {topic} -> {tid}')
+    print(body)
+    seen.append({'date': dt.datetime.now(dt.timezone.utc).isoformat(), 'topic': topic or body[:60]})
+    try:
+        NEWS_LOG.write_text(json.dumps(seen[-60:], indent=2))
+    except Exception:
+        pass
 
 
 def gen_scenario_post(s):
@@ -327,13 +376,9 @@ def post_thread(tweets, image_buf=None):
 
 
 def slot_1_market():
-    if dt.date.today().toordinal() % 2 == 0:
-        asset, df = 'Gold', get_gold_data()
-    else:
-        asset, df = 'Bitcoin', get_bitcoin_data()
+    asset, df = pick_primary_asset()
     s = summarize(df, asset)
     resolved = log_levels(s)
-    # honest follow-up first: how did my last public levels age?
     if resolved:
         entry = resolved[0]
         try:
@@ -361,13 +406,9 @@ def slot_1_market():
 
 
 def slot_2_story():
-    # second market read of the day ~50% of the time (the other asset), else trending/story
     if random.random() < 0.5:
         try:
-            if dt.date.today().toordinal() % 2 == 0:
-                asset, df = 'Bitcoin', get_bitcoin_data()
-            else:
-                asset, df = 'Gold', get_gold_data()
+            asset, df = pick_secondary_asset()
             s = summarize(df, asset)
             chart = make_chart(df, s, scenario=True)
             tid = post_to_x(maybe_reply_bait(gen_scenario_post(s)), chart)
@@ -407,7 +448,11 @@ def slot_3_motivation():
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--slot', type=int, choices=[1, 2, 3])
+    p.add_argument('--news', action='store_true')
     a = p.parse_args()
+    if a.news:
+        check_news()
+        return
     slot = a.slot
     if slot is None:
         h = dt.datetime.now(dt.timezone.utc).hour
