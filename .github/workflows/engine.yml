@@ -1,0 +1,69 @@
+name: X Content Engine
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Force a post now: 1=market, 2=story, 3=motivation"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check schedule
+        id: plan
+        run: |
+          if [ -n "${{ github.event.inputs.slot }}" ]; then
+            echo "result=SLOT=${{ github.event.inputs.slot }} DELAY=0" >> $GITHUB_OUTPUT
+          else
+            echo "result=$(python scheduler.py)" >> $GITHUB_OUTPUT
+          fi
+      - name: Install dependencies
+        run: pip install anthropic tweepy matplotlib pandas requests requests-oauthlib
+      - name: Write secrets config
+        run: |
+          python - << 'EOF'
+          import os, re
+          cfg = open("config.py").read()
+          for key in ["ANTHROPIC_API_KEY","X_API_KEY","X_API_SECRET","X_ACCESS_TOKEN","X_ACCESS_SECRET","GOLD_API_KEY"]:
+              cfg = re.sub(rf'{key} = .*', f'{key} = "{os.environ[key]}"', cfg)
+          open("config.py","w").write(cfg)
+          EOF
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          GOLD_API_KEY: ${{ secrets.GOLD_API_KEY }}
+      - name: Breaking news check
+        continue-on-error: true
+        run: python bot.py --news
+      - name: Wait then post
+        if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
+        run: |
+          RESULT="${{ steps.plan.outputs.result }}"
+          SLOT=$(echo $RESULT | sed 's/.*SLOT=\([0-9]*\).*/\1/')
+          DELAY=$(echo $RESULT | sed 's/.*DELAY=\([0-9]*\).*/\1/')
+          echo "Posting slot $SLOT after $DELAY min delay"
+          sleep $((DELAY * 60))
+          python bot.py --slot $SLOT
+      - name: Save state back to repo
+        if: always()
+        continue-on-error: true
+        run: |
+          git config user.name "xander-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -- config.py
+          git add -A performance_log.json news_log.json articles/ 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "bot: update state" && git push)
