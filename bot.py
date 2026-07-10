@@ -27,6 +27,15 @@ PHOTOS_DIR = HERE / 'photos'
 PERF_LOG = HERE / 'performance_log.json'
 ARTICLES_DIR = HERE / 'articles'
 
+REPLY_BAIT = [
+    'What level are you watching here?',
+    'Am I wrong on this?',
+    'Where are you leaning right now?',
+    'Curious how you are reading this one.',
+    'What is your take?',
+    'Are you buying the move or fading it?',
+]
+
 def get_bitcoin_data(days=30):
     url = 'https://api.coingecko.com/api/v3/coins/bitcoin/ohlc'
     r = requests.get(url, params={'vs_currency': 'usd', 'days': days}, timeout=30)
@@ -43,13 +52,7 @@ def _gold_spot():
     r = requests.get(url, headers=h, timeout=30)
     r.raise_for_status()
     j = r.json()
-    return {
-        'price': float(j['price']),
-        'open': float(j.get('open_price', j['price'])),
-        'high': float(j.get('high_price', j['price'])),
-        'low': float(j.get('low_price', j['price'])),
-        'prev_close': float(j.get('prev_close_price', j['price'])),
-    }
+    return {'price': float(j['price']), 'open': float(j.get('open_price', j['price'])), 'high': float(j.get('high_price', j['price'])), 'low': float(j.get('low_price', j['price'])), 'prev_close': float(j.get('prev_close_price', j['price']))}
 
 
 def get_gold_data(days=30):
@@ -153,11 +156,11 @@ def pick_story_image(hook):
 
 claude = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
-PERSONA = ('You write X posts for Alexander (@xanderzone), a trader and entrepreneur. Voice: confident, direct, a little provocative, reflective. Hooks hard in line one. Style: short punchy lines, line breaks between thoughts, no hashtags, max 1 emoji. HARD RULES: Everything is HIS PERSONAL VIEW (my read, the way I see it, I am watching). NEVER give advice, never buy/sell/you should/get in/dont miss. NEVER state predictions as fact; use scenarios. No fake claims about results or wealth.')
+PERSONA = ('You write X posts for Alexander (@xanderzone), a trader and entrepreneur. Voice: confident, direct, a little provocative, reflective. The FIRST LINE must be a scroll-stopping hook - a bold claim, a sharp question, or a pattern-interrupt that makes people stop and read. Style: short punchy lines, line breaks between thoughts, no hashtags, max 1 emoji. HARD RULES: Everything is HIS PERSONAL VIEW (my read, the way I see it, I am watching). NEVER give advice, never buy/sell/you should/get in/dont miss. NEVER state predictions as fact; use scenarios. No fake claims about results or wealth. NEVER use hashtags - they reduce reach.')
 
 TONE = ('Example tone for hot-takes: This might sound crazy, but there are guys that spent all year telling you the four year cycle for Bitcoin was dumb, and when they were proven wrong, they did not admit it, they just kept saying the market is wrong, and they are right. Calling out narratives, ego, crowd psychology with a knowing smirk.')
 
-ESSAY_VOICE = ('Write in an immersive, personal-essay voice. Very short paragraphs, often one sentence. Intentional white space between lines. A hook that pulls the reader in immediately. Build quietly, then land a calm, resonant insight at the end. Reflective, confident, never preachy, never salesy. No hashtags, no emojis, no advice, no fabricated personal trades or fake numbers. It is a mood and a way of thinking, not a brag.')
+ESSAY_VOICE = ('Write in an immersive, personal-essay voice. Very short paragraphs, often one sentence. Intentional white space between lines. A hook that pulls the reader in immediately. Build quietly, then land a calm, resonant insight at the end. Reflective, confident, never preachy, never salesy. No hashtags, no emojis, no advice, no fabricated personal trades or fake numbers.')
 
 
 def _ask(prompt, use_search=False, max_tokens=900):
@@ -169,41 +172,51 @@ def _ask(prompt, use_search=False, max_tokens=900):
     return txt.strip('"')
 
 
+def maybe_reply_bait(text):
+    if 'Not financial advice.' in text:
+        if random.random() < 0.30:
+            q = random.choice(REPLY_BAIT)
+            return text.replace('Not financial advice.', q + '\n\nNot financial advice.')
+        return text
+    if random.random() < 0.30:
+        return text + '\n\n' + random.choice(REPLY_BAIT)
+    return text
+
+
 def gen_market_post(s):
     below, above = round_levels(s['latest'])
-    return _ask(f"Live {s['asset']} spot. Price now ${s['latest']:,.2f}, 7d {s['change_7d_pct']}%, 30d {s['change_30d_pct']}%. 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Round levels ${below:,.0f} below, ${above:,.0f} above. Write ONE X post: hooking personal read, reference the real price and one round level, scenario thinking only, under 260 chars, end EXACTLY: Not financial advice. Return ONLY the post text.")
+    return _ask(f"Live {s['asset']} spot. Price now ${s['latest']:,.2f}, 7d {s['change_7d_pct']}%, 30d {s['change_30d_pct']}%. 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Round levels ${below:,.0f} below, ${above:,.0f} above. Write ONE X post: a scroll-stopping hook first line, then a hooking personal read, reference the real price and one round level, scenario thinking only, under 250 chars, end EXACTLY: Not financial advice. Return ONLY the post text.")
 
 
 def gen_weekly_recap(s):
-    return _ask(f"Sunday recap for {s['asset']} live spot. Now ${s['latest']:,.2f}, 7d {s['change_7d_pct']}%, 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Write ONE X post recapping the weeks move and key level tested/held, scenario for week ahead, under 270 chars, end EXACTLY: Not financial advice. Return ONLY the post text.")
+    return _ask(f"Sunday recap for {s['asset']} live spot. Now ${s['latest']:,.2f}, 7d {s['change_7d_pct']}%, 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Write ONE X post recapping the weeks move and key level tested/held, scenario for week ahead, strong hook first line, under 260 chars, end EXACTLY: Not financial advice. Return ONLY the post text.")
 
 
 def gen_thread(s):
     below, above = round_levels(s['latest'])
-    raw = _ask(f"{s['asset']} just moved {s['change_1d_pct']}% today to ${s['latest']:,.2f}. 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Round levels ${below:,.0f}/${above:,.0f}. Write a 3-tweet X THREAD breaking down the move (personal read, scenarios, what you are watching). Separate the 3 tweets with a line containing only three dashes. Each tweet under 270 chars. Last tweet ends EXACTLY: Not financial advice. Return ONLY the tweets.")
+    raw = _ask(f"{s['asset']} just moved {s['change_1d_pct']}% today to ${s['latest']:,.2f}. 30d high ${s['high_30d']:,.0f} low ${s['low_30d']:,.0f}. Round levels ${below:,.0f}/${above:,.0f}. Write a 3-tweet X THREAD breaking down the move (scroll-stopping hook, personal read, scenarios, what you are watching). Separate the 3 tweets with a line containing only three dashes. Each tweet under 270 chars. Last tweet ends EXACTLY: Not financial advice. Return ONLY the tweets.")
     parts = [p.strip() for p in raw.split('---') if p.strip()]
     return parts[:3] if parts else [raw]
 
 
 def gen_story(theme):
-    return _ask(f'{TONE} Write ONE X post in that tone on: {theme}. Strong hook line 1. No price calls, no advice. Under 270 chars. Return ONLY the post.')
+    return _ask(f'{TONE} Write ONE X post in that tone on: {theme}. Scroll-stopping hook line 1. No price calls, no advice. Under 260 chars. Return ONLY the post.')
 
 
 def gen_motivation(theme):
-    return _ask(f'Write ONE X post: motivational about markets, money, discipline, the builders journey. Theme: {theme}. Warm but strong, story-flavored. No advice. Under 270 chars. Return ONLY the post.')
+    return _ask(f'Write ONE X post: motivational about markets, money, discipline, the builders journey. Theme: {theme}. Strong hook first line, warm but strong, story-flavored. No advice. Under 260 chars. Return ONLY the post.')
 
 
 def gen_trending():
-    return _ask('Search the web for what is trending RIGHT NOW in forex, crypto, and trading lifestyle in the last 24 hours. Pick the single most talked-about topic in those niches. Then write ONE classy, hooking X post giving MY personal take on it in the persona voice - opinionated but elegant, crowd-psychology angle welcome. Reference the topic clearly. No links, no hashtags. Under 270 chars. If it touches markets, end EXACTLY: Not financial advice. Return ONLY the post text.', use_search=True)
+    return _ask('Search the web for what is trending RIGHT NOW in forex, crypto, and trading lifestyle in the last 24 hours. Pick the single most talked-about topic in those niches. Then write ONE classy, hooking X post giving MY personal take on it in the persona voice - scroll-stopping hook first line, opinionated but elegant, crowd-psychology angle welcome. Reference the topic clearly. No links, no hashtags. Under 265 chars. If it touches markets, end EXACTLY: Not financial advice. Return ONLY the post text.', use_search=True)
 
 
 def gen_essay(topic):
-    return _ask(f'{ESSAY_VOICE} Topic: {topic}. Write ONE long-form X post (an immersive essay) in that voice. Use short paragraphs with blank lines between them. Open with a hook, build quietly, end on a resonant one-line insight. 150 to 320 words. No hashtags, no emojis, no advice. Return ONLY the essay text.', max_tokens=1200)
+    return _ask(f'{ESSAY_VOICE} Topic: {topic}. Write ONE long-form X post (an immersive essay) in that voice. Use short paragraphs with blank lines between them. Open with a scroll-stopping hook, build quietly, end on a resonant one-line insight. 150 to 320 words. No hashtags, no emojis, no advice. Return ONLY the essay text.', max_tokens=1200)
 
 
 def gen_article(topic):
-    body = _ask(f'{ESSAY_VOICE} Topic: {topic}. Write a full long-form X ARTICLE (a personal essay, 500 to 800 words) in that immersive voice. Give it a short, magnetic title on the very first line, then a blank line, then the essay with short paragraphs and section breaks (use a single line with three dashes between sections). End on a quiet, resonant insight. No hashtags, no emojis, no advice, no fabricated trades or fake numbers. Return ONLY title and body.', max_tokens=2500)
-    return body
+    return _ask(f'{ESSAY_VOICE} Topic: {topic}. Write a full long-form X ARTICLE (a personal essay, 500 to 800 words) in that immersive voice. Give it a short, magnetic title on the very first line, then a blank line, then the essay with short paragraphs and section breaks (a single line with three dashes between sections). End on a quiet, resonant insight. No hashtags, no emojis, no advice, no fabricated trades or fake numbers. Return ONLY title and body.', max_tokens=2500)
 
 
 def save_article(topic):
@@ -294,12 +307,11 @@ def slot_1_market():
         tid = post_thread(tweets, image_buf=chart)
         print(f"[slot1 THREAD {asset}] {tid}")
     elif dt.date.today().weekday() == 6:
-        tid = post_to_x(gen_weekly_recap(s), chart)
+        tid = post_to_x(maybe_reply_bait(gen_weekly_recap(s)), chart)
         print(f"[slot1 recap {asset}] {tid}")
     else:
-        tid = post_to_x(gen_market_post(s), chart)
+        tid = post_to_x(maybe_reply_bait(gen_market_post(s)), chart)
         print(f"[slot1 market {asset}] {tid}")
-    # Sunday: also save a long-form article draft to the repo (GitHub emails you)
     if dt.date.today().weekday() == 6:
         save_article(random.choice(config.ESSAY_TOPICS))
 
@@ -308,20 +320,19 @@ def slot_2_story():
     if random.random() < 0.4:
         try:
             text = gen_trending()
-            tid = post_to_x(text, pick_story_image(text.split('\n')[0]))
+            tid = post_to_x(maybe_reply_bait(text), pick_story_image(text.split('\n')[0]))
             print(f"[slot2 trending] {tid}")
             print(text)
             return
         except Exception as e:
             print(f'trending failed, falling back to story: {e}')
     text = gen_story(random.choice(config.STORY_THEMES))
-    tid = post_to_x(text, pick_story_image(text.split('\n')[0]))
+    tid = post_to_x(maybe_reply_bait(text), pick_story_image(text.split('\n')[0]))
     print(f"[slot2 story] {tid}")
     print(text)
 
 
 def slot_3_motivation():
-    # ~2x per week this slot posts a reflective long-form essay instead of a short motivation line
     if dt.date.today().weekday() in (1, 4):
         topic = random.choice(config.ESSAY_TOPICS)
         text = gen_essay(topic)
@@ -330,7 +341,7 @@ def slot_3_motivation():
         print(text)
         return
     text = gen_motivation(random.choice(config.MOTIVATION_THEMES))
-    tid = post_to_x(text)
+    tid = post_to_x(text, pick_story_image(text.split('\n')[0]))
     print(f"[slot3 motivation] {tid}")
     print(text)
 
