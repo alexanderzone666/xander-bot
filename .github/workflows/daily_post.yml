@@ -14,12 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Check todays random schedule
+      - name: Check schedule
         id: plan
         run: |
           if [ -n "${{ github.event.inputs.slot }}" ]; then
@@ -27,22 +25,19 @@ jobs:
           else
             echo "result=$(python scheduler.py)" >> $GITHUB_OUTPUT
           fi
-
       - name: Stop if not a posting hour
         if: contains(steps.plan.outputs.result, 'skip')
         run: echo "Not a posting hour today. Exiting."
-
       - name: Install dependencies
         if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
-        run: pip install anthropic tweepy yfinance matplotlib pandas requests requests-oauthlib
-
+        run: pip install anthropic tweepy matplotlib pandas requests requests-oauthlib
       - name: Write secrets config
         if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
         run: |
           python - << 'EOF'
           import os, re
           cfg = open("config.py").read()
-          for key in ["ANTHROPIC_API_KEY","X_API_KEY","X_API_SECRET","X_ACCESS_TOKEN","X_ACCESS_SECRET"]:
+          for key in ["ANTHROPIC_API_KEY","X_API_KEY","X_API_SECRET","X_ACCESS_TOKEN","X_ACCESS_SECRET","GOLD_API_KEY"]:
               cfg = re.sub(rf'{key} = .*', f'{key} = "{os.environ[key]}"', cfg)
           open("config.py","w").write(cfg)
           EOF
@@ -52,8 +47,8 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-
-      - name: Wait a random few minutes then post
+          GOLD_API_KEY: ${{ secrets.GOLD_API_KEY }}
+      - name: Wait then post
         if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
         run: |
           RESULT="${{ steps.plan.outputs.result }}"
