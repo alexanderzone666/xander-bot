@@ -200,12 +200,16 @@ TONE = ('Example tone for hot-takes: This might sound crazy, but there are guys 
 ESSAY_VOICE = ('Write in an immersive, personal-essay voice. Very short paragraphs, often one sentence. Intentional white space between lines. A hook that pulls the reader in immediately. Build quietly, then land a calm, resonant insight at the end. Reflective, confident, never preachy, never salesy. No hashtags, no emojis, no advice, no fabricated personal trades or fake numbers.')
 
 
-def _ask(prompt, use_search=False, max_tokens=900):
+def _ask(prompt, use_search=False, max_tokens=900, last_only=False):
     kwargs = dict(model='claude-sonnet-4-6', max_tokens=max_tokens, system=PERSONA, messages=[{'role': 'user', 'content': prompt}])
     if use_search:
         kwargs['tools'] = [{'type': 'web_search_20250305', 'name': 'web_search'}]
     m = claude.messages.create(**kwargs)
-    txt = '\n'.join([b.text for b in m.content if getattr(b, 'type', '') == 'text']).strip()
+    blocks = [b.text for b in m.content if getattr(b, 'type', '') == 'text']
+    if last_only:
+        txt = (blocks[-1] if blocks else '').strip()
+    else:
+        txt = '\n'.join(blocks).strip()
     return txt.strip('"')
 
 
@@ -220,7 +224,13 @@ def maybe_reply_bait(text):
     return text
 
 
+REASONING_PHRASES = ['let me', "i'll", 'i will', 'searching', 'search for', 'checking', 'check for', 'applying the', 'strict bar', 'markets are closed', 'no breaking', 'does not meet', 'doesn', 'based on my', 'the last 3 hours', 'qualifies', 'sources confirm', 'here is the post', "here's the post", 'kitco confirms']
+
+
 def check_news():
+    if dt.datetime.now(dt.timezone.utc).weekday() >= 5:
+        print('news check: weekend, markets closed, skipping')
+        return
     try:
         seen = json.loads(NEWS_LOG.read_text()) if NEWS_LOG.exists() else []
     except Exception:
@@ -232,18 +242,29 @@ def check_news():
     except Exception:
         pass
     price_line = f' Live gold spot right now: ${spot:,.2f}.' if spot else ''
-    raw = _ask(f"Search the web for BREAKING or major news from the last 3 hours that directly impacts GOLD (XAUUSD) or BITCOIN prices - things like Fed decisions, CPI/inflation surprises, war escalation, major ETF flows, exchange failures, huge liquidations, central bank gold buying.{price_line} Topics already covered (do NOT repeat these): {seen_topics[-25:]}. STRICT BAR: only genuinely HIGH-impact, market-moving news qualifies. If nothing meets that bar, reply with exactly NO_NEWS and nothing else. If one does: first line exactly 'TOPIC: <4-6 word unique key>'. Then a blank line. Then ONE X post: casual insider reaction, NOT news-channel style - like you just saw it and are thinking out loud: what happened in one tight line, then 'my read:' on how this likely hits gold or BTC (scenario language, reference the live price if gold). Confident, classy, human. No links, no hashtags. Under 270 chars. End EXACTLY: Not financial advice. ", use_search=True, max_tokens=800)
-    if 'NO_NEWS' in raw[:40]:
+    raw = _ask(f"Search the web for BREAKING news from the last 3 hours that directly impacts GOLD (XAUUSD) or BITCOIN prices - Fed decisions, CPI surprises, war escalation, major ETF flows, exchange failures, huge liquidations, central bank gold buying.{price_line} Topics already covered, do NOT repeat: {seen_topics[-25:]}. YOU ARE A SILENT FILTER WITH EXACTLY TWO ALLOWED OUTPUTS AND NOTHING ELSE. OUTPUT 1 (when nothing from the last 3 hours meets a genuinely HIGH-impact market-moving bar): the single token NO_NEWS alone. No explanation, no reasoning, no commentary about why, not one extra word. OUTPUT 2 (only when real breaking news qualifies): first line exactly 'TOPIC: <4-6 word unique key>', then a blank line, then ONE X post - casual insider reaction, not news-channel style: what happened in one tight line, then 'my read:' on how it likely hits gold or BTC in scenario language. No links, no hashtags. Under 270 chars. End EXACTLY: Not financial advice. NEVER output your thinking, your search process, or any commentary in either case.", use_search=True, max_tokens=800, last_only=True).strip()
+    up = raw.upper()
+    if 'NO_NEWS' in up:
         print('news check: nothing major')
         return
-    lines = raw.split('\n')
-    topic = ''
-    body = raw
-    if lines and lines[0].strip().upper().startswith('TOPIC:'):
-        topic = lines[0].split(':', 1)[1].strip()[:80]
-        body = '\n'.join(lines[1:]).strip()
+    lns = raw.split('\n')
+    if not lns or not lns[0].strip().upper().startswith('TOPIC:'):
+        print('news check: malformed output (no TOPIC line), skipping')
+        return
+    topic = lns[0].split(':', 1)[1].strip()[:80]
+    body = '\n'.join(lns[1:]).strip()
+    bl = body.lower()
+    if any(p in bl for p in REASONING_PHRASES):
+        print('news check: reasoning detected in body, skipping')
+        return
+    if len(body) < 30 or len(body) > 279:
+        print(f'news check: bad length {len(body)}, skipping')
+        return
+    if 'Not financial advice.' not in body:
+        print('news check: missing disclaimer, skipping')
+        return
     if topic and any(topic.lower() == t.lower() for t in seen_topics):
-        print(f'news check: duplicate topic {topic}')
+        print(f'news check: duplicate topic {topic}, skipping')
         return
     tid = post_to_x(body)
     print(f'[NEWS] {topic} -> {tid}')
@@ -285,7 +306,13 @@ def gen_motivation(theme):
 
 
 def gen_trending():
-    return _ask('Search the web for what is trending RIGHT NOW in forex, crypto, and trading lifestyle in the last 24 hours. Pick the single most talked-about topic in those niches. Then write ONE classy, hooking X post giving MY personal take on it in the persona voice - scroll-stopping hook first line, opinionated but elegant, crowd-psychology angle welcome. Reference the topic clearly. No links, no hashtags. Under 265 chars. If it touches markets, end EXACTLY: Not financial advice. Return ONLY the post text.', use_search=True)
+    raw = _ask('Search the web for what is trending RIGHT NOW in forex, crypto, and trading lifestyle in the last 24 hours. Pick the single most talked-about topic. Then output ONLY one classy, hooking X post giving MY personal take in the persona voice - scroll-stopping hook first line, opinionated but elegant. Reference the topic clearly. No links, no hashtags. Under 265 chars. If it touches markets, end EXACTLY: Not financial advice. OUTPUT ONLY THE POST TEXT - no preamble, no topic explanation, no commentary about your choice.', use_search=True, last_only=True).strip()
+    if '---' in raw:
+        raw = raw.split('---')[-1].strip()
+    bl = raw.lower()
+    if any(p in bl for p in REASONING_PHRASES) or len(raw) < 30 or len(raw) > 279:
+        raise Exception('trending output malformed, falling back')
+    return raw
 
 
 def gen_essay(topic):
