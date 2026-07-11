@@ -46,6 +46,9 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           GOLD_API_KEY: ${{ secrets.GOLD_API_KEY }}
+      - name: Breaking news check
+        continue-on-error: true
+        run: python bot.py --news
       - name: Wait then post
         if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
         run: |
