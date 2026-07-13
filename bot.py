@@ -26,6 +26,7 @@ HERE = Path(__file__).parent
 PHOTOS_DIR = HERE / 'photos'
 PERF_LOG = HERE / 'performance_log.json'
 NEWS_LOG = HERE / 'news_log.json'
+POST_STATE = HERE / 'post_state.json'
 ARTICLES_DIR = HERE / 'articles'
 
 REPLY_BAIT = [
@@ -224,7 +225,7 @@ def maybe_reply_bait(text):
     return text
 
 
-REASONING_PHRASES = ['let me', "i'll", 'i will', 'searching', 'search for', 'checking', 'check for', 'applying the', 'strict bar', 'markets are closed', 'no breaking', 'does not meet', 'doesn', 'based on my', 'the last 3 hours', 'qualifies', 'sources confirm', 'here is the post', "here's the post", 'kitco confirms']
+REASONING_PHRASES = ['let me', "i'll", 'i will', 'searching', 'search for', 'checking', 'check for', 'applying the', 'strict bar', 'markets are closed', 'no breaking', 'does not meet', 'based on my', 'the last 3 hours', 'qualifies', 'sources confirm', 'here is the post', "here's the post", 'kitco confirms']
 
 
 def check_news():
@@ -485,13 +486,50 @@ def slot_3_motivation():
     print(text)
 
 
+def auto_post():
+    now = dt.datetime.now(dt.timezone.utc)
+    today = now.date().isoformat()
+    try:
+        st = json.loads(POST_STATE.read_text()) if POST_STATE.exists() else {}
+    except Exception:
+        st = {}
+    if st.get('date') != today:
+        st = {'date': today, 'count': 0, 'last': None}
+    if st.get('count', 0) >= 4:
+        print('auto: daily post cap (4) reached, skipping')
+        return
+    if st.get('last'):
+        try:
+            last = dt.datetime.fromisoformat(st['last'])
+            gap_h = (now - last).total_seconds() / 3600.0
+            if gap_h < 3.0:
+                print(f'auto: only {gap_h:.1f}h since last post, skipping')
+                return
+        except Exception:
+            pass
+    h = now.hour
+    slot = 1 if h < 12 else (2 if h < 17 else 3)
+    print(f'auto: posting slot {slot} (utc hour {h}, post {st.get("count",0)+1}/4 today)')
+    {1: slot_1_market, 2: slot_2_story, 3: slot_3_motivation}[slot]()
+    st['count'] = st.get('count', 0) + 1
+    st['last'] = now.isoformat()
+    try:
+        POST_STATE.write_text(json.dumps(st, indent=2))
+    except Exception:
+        pass
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--slot', type=int, choices=[1, 2, 3])
     p.add_argument('--news', action='store_true')
+    p.add_argument('--auto', action='store_true')
     a = p.parse_args()
     if a.news:
         check_news()
+        return
+    if a.auto:
+        auto_post()
         return
     slot = a.slot
     if slot is None:
