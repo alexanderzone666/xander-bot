@@ -20,14 +20,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Check schedule
-        id: plan
-        run: |
-          if [ -n "${{ github.event.inputs.slot }}" ]; then
-            echo "result=SLOT=${{ github.event.inputs.slot }} DELAY=0" >> $GITHUB_OUTPUT
-          else
-            echo "result=$(python scheduler.py)" >> $GITHUB_OUTPUT
-          fi
       - name: Install dependencies
         run: pip install anthropic tweepy matplotlib pandas requests requests-oauthlib
       - name: Write secrets config
@@ -49,15 +41,13 @@ jobs:
       - name: Breaking news check
         continue-on-error: true
         run: python bot.py --news
-      - name: Wait then post
-        if: ${{ !contains(steps.plan.outputs.result, 'skip') }}
+      - name: Post
         run: |
-          RESULT="${{ steps.plan.outputs.result }}"
-          SLOT=$(echo $RESULT | sed 's/.*SLOT=\([0-9]*\).*/\1/')
-          DELAY=$(echo $RESULT | sed 's/.*DELAY=\([0-9]*\).*/\1/')
-          echo "Posting slot $SLOT after $DELAY min delay"
-          sleep $((DELAY * 60))
-          python bot.py --slot $SLOT
+          if [ -n "${{ github.event.inputs.slot }}" ]; then
+            python bot.py --slot ${{ github.event.inputs.slot }}
+          else
+            python bot.py --auto
+          fi
       - name: Save state back to repo
         if: always()
         continue-on-error: true
@@ -65,5 +55,5 @@ jobs:
           git config user.name "xander-bot"
           git config user.email "bot@users.noreply.github.com"
           git checkout -- config.py
-          git add -A performance_log.json news_log.json articles/ 2>/dev/null || true
+          git add -A performance_log.json news_log.json post_state.json articles/ 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "bot: update state" && git push)
